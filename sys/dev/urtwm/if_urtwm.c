@@ -555,7 +555,9 @@ urtwm_attach(device_t self)
 #endif
 
 	/* Enable TX watchdog */
+#ifdef D4054
 	ic->ic_flags_ext |= IEEE80211_FEXT_WATCHDOG;
+#endif
 
 	urtwm_getradiocaps(ic, IEEE80211_CHAN_MAX, &ic->ic_nchans,
 	    ic->ic_channels);
@@ -3279,7 +3281,9 @@ urtwm_start(struct urtwm_softc *sc)
 			    IFCOUNTER_OERRORS, 1);
 			STAILQ_INSERT_HEAD(&sc->sc_tx_inactive, bf, next);
 			m_freem(m);
+#ifdef D4054
 			ieee80211_tx_watchdog_refresh(ni->ni_ic, -1, 0);
+#endif
 			ieee80211_free_node(ni);
 			break;
 		}
