@@ -3035,8 +3035,6 @@ urtwm_tx_data(struct urtwm_softc *sc, struct ieee80211_node *ni,
 #endif
 		txd->txdw3 |= htole32(R88A_TXDW3_DRVRATE);
 
-	/* XXX broken */
-#ifdef URTWM_TODO
 	if (!hasqos) {
 		/* Use HW sequence numbering for non-QoS frames. */
 		txd->txdw8 |= htole32(R88A_TXDW8_HWSEQ_EN);
@@ -3045,7 +3043,6 @@ urtwm_tx_data(struct urtwm_softc *sc, struct ieee80211_node *ni,
 		txd->txdw9 |= htole32(SM(R88A_TXDW9_SEQ,
 		    M_SEQNO_GET(m) % IEEE80211_SEQ_RANGE));
 	}
-#endif
 
 	if (k != NULL && !(k->wk_flags & IEEE80211_KEY_SWCRYPT)) {
 		uint8_t cipher;
@@ -3156,7 +3153,6 @@ urtwm_tx_raw(struct urtwm_softc *sc, struct ieee80211_node *ni,
 	txd->txdw4 |= htole32(SM(R88A_TXDW4_DATARATE_FB_LMT, 0x1f));
 	txd->txdw3 |= htole32(R88A_TXDW3_DRVRATE);
 
-#ifdef URTWM_TODO
 	if (!IEEE80211_QOS_HAS_SEQ(wh)) {
 		/* Use HW sequence numbering for non-QoS frames. */
 		txd->txdw8 |= htole32(R88A_TXDW8_HWSEQ_EN);
@@ -3165,7 +3161,6 @@ urtwm_tx_raw(struct urtwm_softc *sc, struct ieee80211_node *ni,
 		txd->txdw9 |= htole32(SM(R88A_TXDW9_SEQ,
 		    M_SEQNO_GET(m) % IEEE80211_SEQ_RANGE));
 	}
-#endif
 
 	if (ieee80211_radiotap_active_vap(vap)) {
 		struct urtwm_tx_radiotap_header *tap = &sc->sc_txtap;
@@ -3229,7 +3224,8 @@ urtwm_tx_checksum(struct r88a_tx_desc *txd)
 	uint16_t sum = 0;
 	int i;
 
-	for (i = 0; i < sizeof(*txd) / 2; i++)
+	/* NB: checksum calculation takes into account only first 32 bytes. */
+	for (i = 0; i < 32 / 2; i++)
 		sum ^= ((uint16_t *)txd)[i];
 	txd->txdsum = sum;	/* NB: already little endian. */
 }
