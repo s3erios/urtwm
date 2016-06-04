@@ -126,7 +126,6 @@ static device_detach_t	urtwm_detach;
 
 static usb_callback_t	urtwm_bulk_tx_callback;
 static usb_callback_t	urtwm_bulk_rx_callback;
-static usb_callback_t	urtwm_intr_rx_callback;
 
 static void		urtwm_radiotap_attach(struct urtwm_softc *);
 static void		urtwm_sysctlattach(struct urtwm_softc *);
@@ -406,17 +405,6 @@ static struct usb_config urtwm_config[URTWM_N_TRANSFER] = {
 		},
 		.callback = urtwm_bulk_tx_callback,
 		.timeout = URTWM_TX_TIMEOUT,	/* ms */
-	},
-	[URTWM_INTR_RD] = {
-		.type = UE_INTERRUPT,
-		.endpoint = UE_ADDR_ANY,
-		.direction = UE_DIR_IN,
-		.bufsize = R88A_INTR_MSG_LEN,
-		.flags = {
-			.pipe_bof = 1,
-			.short_xfer_ok = 1,
-		},
-		.callback = urtwm_intr_rx_callback,
 	},
 };
 
@@ -1154,39 +1142,6 @@ finish:
 
 	/* Kick-start more transmit in case we stalled */
 	urtwm_start(sc);
-}
-
-/*
- * XXX can we get something useful from it?
- */
-static void
-urtwm_intr_rx_callback(struct usb_xfer *xfer, usb_error_t error)
-{
-	uint8_t input[R88A_INTR_MSG_LEN];
-	struct usb_page_cache *pc;
-	int actlen;
-
-	usbd_xfer_status(xfer, &actlen, NULL, NULL, NULL);
-
-	switch (USB_GET_STATE(xfer)) {
-	case USB_ST_TRANSFERRED:
-		pc = usbd_xfer_get_frame(xfer, 0);
-		usbd_copy_out(pc, 0, &input, sizeof(input));
-		/* FALLTHROUGH */
-	case USB_ST_SETUP:
-tr_setup:
-		usbd_xfer_set_frame_len(xfer, 0, usbd_xfer_max_len(xfer));
-		usbd_transfer_submit(xfer);
-		break;
-
-	default:		/* Error */
-		if (error != USB_ERR_CANCELLED) {
-			/* try to clear stall first */
-			usbd_xfer_set_stall(xfer);
-			goto tr_setup;
-		}
-		break;
-	}
 }
 
 static void
@@ -5279,7 +5234,6 @@ urtwm_init(struct urtwm_softc *sc)
 #endif
 
 	usbd_transfer_start(sc->sc_xfer[URTWM_BULK_RX]);
-	usbd_transfer_start(sc->sc_xfer[URTWM_INTR_RD]);
 
 	sc->sc_flags |= URTWM_RUNNING;
 
