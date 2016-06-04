@@ -4093,7 +4093,7 @@ urtwm_band_change(struct urtwm_softc *sc, struct ieee80211_channel *c,
 	for (i = 0; i < 2; i++) {
 		uint16_t val;
 
-		switch ((swing >> i) & 0x3) {
+		switch ((swing >> i * 2) & 0x3) {
 		case 0:
 			val = 0x200;	/* 0 dB	*/
 			break;
