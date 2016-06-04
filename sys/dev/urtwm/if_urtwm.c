@@ -124,7 +124,7 @@ static device_probe_t	urtwm_match;
 static device_attach_t	urtwm_attach;
 static device_detach_t	urtwm_detach;
 
-static usb_callback_t   urtwm_bulk_tx_callback;
+static usb_callback_t	urtwm_bulk_tx_callback;
 static usb_callback_t	urtwm_bulk_rx_callback;
 static usb_callback_t	urtwm_intr_rx_callback;
 
@@ -142,11 +142,10 @@ static struct mbuf *	urtwm_rx_copy_to_mbuf(struct urtwm_softc *,
 			    struct r92c_rx_stat *, int);
 static struct mbuf *	urtwm_report_intr(struct urtwm_softc *,
 			    struct usb_xfer *, struct urtwm_data *);
+static void		urtwm_c2h_report(struct urtwm_softc *, uint8_t *, int);
+static void		urtwm_ratectl_tx_complete(struct urtwm_softc *,
+			    void *, int);
 static struct mbuf *	urtwm_rxeof(struct urtwm_softc *, uint8_t *, int);
-#ifdef URTWM_TODO
-static void		urtwm_r88e_ratectl_tx_complete(struct urtwm_softc *,
-			    void *);
-#endif
 static struct ieee80211_node *urtwm_rx_frame(struct urtwm_softc *,
 			    struct mbuf *, int8_t *);
 static void		urtwm_txeof(struct urtwm_softc *, struct urtwm_data *,
@@ -320,12 +319,10 @@ static void		urtwm_set_multi(struct urtwm_softc *);
 static void		urtwm_set_promisc(struct urtwm_softc *);
 static void		urtwm_update_promisc(struct ieee80211com *);
 static void		urtwm_update_mcast(struct ieee80211com *);
-#ifdef URTWM_TODO
 static struct ieee80211_node *urtwm_node_alloc(struct ieee80211vap *,
 			    const uint8_t mac[IEEE80211_ADDR_LEN]);
 static void		urtwm_newassoc(struct ieee80211_node *, int);
 static void		urtwm_node_free(struct ieee80211_node *);
-#endif
 static void		urtwm_set_chan(struct urtwm_softc *,
 		    	    struct ieee80211_channel *);
 static void		urtwm_antsel_init(struct urtwm_softc *);
@@ -480,6 +477,7 @@ urtwm_attach(device_t self)
 	mtx_init(&sc->sc_mtx, device_get_nameunit(self),
 	    MTX_NETWORK_LOCK, MTX_DEF);
 	URTWM_CMDQ_LOCK_INIT(sc);
+	URTWM_NT_LOCK_INIT(sc);
 	mbufq_init(&sc->sc_snd, ifqmaxlen);
 
 	error = urtwm_setup_endpoints(sc);
@@ -580,12 +578,10 @@ urtwm_attach(device_t self)
 	ic->ic_updateslot = urtwm_update_slot;
 	ic->ic_update_promisc = urtwm_update_promisc;
 	ic->ic_update_mcast = urtwm_update_mcast;
-#ifdef URTWM_TODO
 	ic->ic_node_alloc = urtwm_node_alloc;
 	ic->ic_newassoc = urtwm_newassoc;
 	sc->sc_node_free = ic->ic_node_free;
 	ic->ic_node_free = urtwm_node_free;
-#endif
 
 	TASK_INIT(&sc->cmdq_task, 0, urtwm_cmdq_cb, sc);
 
@@ -668,6 +664,7 @@ urtwm_detach(device_t self)
 		ieee80211_ifdetach(ic);
 	}
 
+	URTWM_NT_LOCK_DESTROY(sc);
 	URTWM_CMDQ_LOCK_DESTROY(sc);
 	mtx_destroy(&sc->sc_mtx);
 
@@ -754,6 +751,7 @@ urtwm_vap_create(struct ieee80211com *ic, const char name[IFNAMSIZ], int unit,
 		callout_init(&uvp->tsf_sync_adhoc, 0);
 	}
 
+	ieee80211_ratectl_init(vap);
 	/* complete setup */
 	ieee80211_vap_attach(vap, ieee80211_media_change,
 	    ieee80211_media_status, mac);
@@ -773,6 +771,7 @@ urtwm_vap_delete(struct ieee80211vap *vap)
 		ieee80211_draintask(ic, &uvp->tsf_sync_adhoc_task);
 		callout_drain(&uvp->tsf_sync_adhoc);
 	}
+	ieee80211_ratectl_deinit(vap);
 	ieee80211_vap_detach(vap);
 	free(uvp, M_80211_VAP);
 }
@@ -838,6 +837,7 @@ urtwm_report_intr(struct urtwm_softc *sc, struct usb_xfer *xfer,
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct r92c_rx_stat *stat;
 	uint8_t *buf;
+	uint32_t rxdw2;
 	int len;
 
 	usbd_xfer_status(xfer, &len, NULL, NULL, NULL);
@@ -849,41 +849,86 @@ urtwm_report_intr(struct urtwm_softc *sc, struct usb_xfer *xfer,
 
 	buf = data->buf;
 	stat = (struct r92c_rx_stat *)buf;
+	rxdw2 = le32toh(stat->rxdw2);
 
-	/*
-	 * XXX in case when rate adaptation will work,
-	 * XXX you will see some number of 'too short'
-	 * XXX or 'incorrect' Rx frames via wlanstats.
-	 */
-#ifdef URTWM_TODO
-	/*
-	 * For 88E chips we can tie the FF flushing here;
-	 * this is where we do know exactly how deep the
-	 * transmit queue is.
-	 *
-	 * But it won't work for R92 chips, so we can't
-	 * take the easy way out.
-	 */
-
-	int report_sel = MS(le32toh(stat->rxdw3), R88E_RXDW3_RPT);	
-
-	switch (report_sel) {
-	case R88E_RXDW3_RPT_RX:
-#endif
+	/* XXX FF flushing? */
+	if (rxdw2 & R88A_RXDW2_RPT_C2H)
+		urtwm_c2h_report(sc, (uint8_t *)&stat[1], len - sizeof(*stat));
+	else
 		return (urtwm_rxeof(sc, buf, len));
-#ifdef URTWM_TODO
-	case R88E_RXDW3_RPT_TX1:
-		urtwm_r88e_ratectl_tx_complete(sc, &stat[1]);
-		break;
-	default:
-		URTWM_DPRINTF(sc, URTWM_DEBUG_INTR,
-		    "%s: case %d was not handled\n", __func__,
-		    report_sel);
-		break;
-	}
-#endif
 
 	return (NULL);
+}
+
+static void
+urtwm_c2h_report(struct urtwm_softc *sc, uint8_t *buf, int len)
+{
+
+	if (len < 2) {
+		device_printf(sc->sc_dev, "C2H report too short (len %d)\n",
+		    len);
+		return;
+	}
+	len -= 2;
+
+	switch (buf[0]) {	/* command id */
+	case R88A_C2H_TX_REPORT:
+		urtwm_ratectl_tx_complete(sc, &buf[2], len);
+		break;
+	case R88A_C2H_IQK_FINISHED:
+		/* TODO */
+	default:
+		device_printf(sc->sc_dev,
+		    "%s: C2H report %d was not handled\n",
+		    __func__, buf[0]);
+	}
+}
+
+static void
+urtwm_ratectl_tx_complete(struct urtwm_softc *sc, void *buf, int len)
+{
+	struct r88a_c2h_tx_rpt *rpt = buf;
+	struct ieee80211vap *vap;
+	struct ieee80211_node *ni;
+	int ntries;
+
+	if (len != sizeof(*rpt)) {
+		device_printf(sc->sc_dev,
+		    "%s: wrong report size (%d, must be %d)\n",
+		    __func__, len, sizeof(*rpt));
+		return;
+	}
+
+	if (rpt->macid > R8821A_MACID_MAX) {
+		device_printf(sc->sc_dev,
+		    "macid %u is too big; increase MACID_MAX limit\n",
+		    rpt->macid);
+		return;
+	}
+
+	ntries = MS(rpt->txrptb2, R88A_TXRPTB2_RETRY_CNT);
+
+	URTWM_NT_LOCK(sc);
+	ni = sc->node_list[rpt->macid];
+	if (ni != NULL) {
+		vap = ni->ni_vap;
+		URTWM_DPRINTF(sc, URTWM_DEBUG_INTR, "%s: frame for macid %d was"
+		    "%s sent (%d retries)\n", __func__, rpt->macid,
+		    (rpt->txrptb0 & (R88A_TXRPTB0_RETRY_OVER |
+		    R88A_TXRPTB0_LIFE_EXPIRE)) ? " not" : "", ntries);
+
+		if (rpt->txrptb0 & R88A_TXRPTB0_RETRY_OVER) {
+			ieee80211_ratectl_tx_complete(vap, ni,
+			    IEEE80211_RATECTL_TX_FAILURE, &ntries, NULL);
+		} else {
+			ieee80211_ratectl_tx_complete(vap, ni,
+			    IEEE80211_RATECTL_TX_SUCCESS, &ntries, NULL);
+		}
+	} else {
+		URTWM_DPRINTF(sc, URTWM_DEBUG_INTR,
+		    "%s: macid %d, ni is NULL\n", __func__, rpt->macid);
+	}
+	URTWM_NT_UNLOCK(sc);
 }
 
 static struct mbuf *
@@ -927,43 +972,6 @@ urtwm_rxeof(struct urtwm_softc *sc, uint8_t *buf, int len)
 
 	return (m0);
 }
-
-#ifdef URTWM_TODO
-static void
-urtwn_r88e_ratectl_tx_complete(struct urtwm_softc *sc, void *arg)
-{
-	struct r88e_tx_rpt_ccx *rpt = arg;
-	struct ieee80211vap *vap;
-	struct ieee80211_node *ni;
-	uint8_t macid;
-	int ntries;
-
-	macid = MS(rpt->rptb1, R88E_RPTB1_MACID);
-	ntries = MS(rpt->rptb2, R88E_RPTB2_RETRY_CNT);
-
-	URTWN_NT_LOCK(sc);
-	ni = sc->node_list[macid];
-	if (ni != NULL) {
-		vap = ni->ni_vap;
-		URTWN_DPRINTF(sc, URTWN_DEBUG_INTR, "%s: frame for macid %d was"
-		    "%s sent (%d retries)\n", __func__, macid,
-		    (rpt->rptb1 & R88E_RPTB1_PKT_OK) ? "" : " not",
-		    ntries);
-
-		if (rpt->rptb1 & R88E_RPTB1_PKT_OK) {
-			ieee80211_ratectl_tx_complete(vap, ni,
-			    IEEE80211_RATECTL_TX_SUCCESS, &ntries, NULL);
-		} else {
-			ieee80211_ratectl_tx_complete(vap, ni,
-			    IEEE80211_RATECTL_TX_FAILURE, &ntries, NULL);
-		}
-	} else {
-		URTWN_DPRINTF(sc, URTWN_DEBUG_INTR, "%s: macid %d, ni is NULL\n",
-		    __func__, macid);
-	}
-	URTWN_NT_UNLOCK(sc);
-}
-#endif	/* URTWM_TODO */
 
 static struct ieee80211_node *
 urtwm_rx_frame(struct urtwm_softc *sc, struct mbuf *m, int8_t *rssi_p)
@@ -2078,8 +2086,9 @@ rate2ridx(uint8_t rate)
 }
 
 #ifdef URTWM_TODO
+/* XXX TODO: provide a sysctl to switch between f/w and net80211 ratectl. */
 /*
- * Initialize rate adaptation in firmware.
+ * Initialize firmware rate adaptation.
  */
 static int
 urtwn_ra_init(struct urtwm_softc *sc)
@@ -2806,7 +2815,7 @@ urtwn_calib_cb(struct urtwn_softc *sc, union sec_param *data)
 	if ((urtwn_read_1(sc, R92C_MSR) & R92C_MSR_MASK) != R92C_MSR_NOLINK)
 		callout_reset(&sc->sc_calib_to, 2*hz, urtwn_calib_to, sc);
 }
-#endif	/* URTWA_TODO */
+#endif	/* URTWM_TODO */
 
 static int8_t
 urtwm_get_rssi_cck(struct urtwm_softc *sc, void *physt)
@@ -3012,7 +3021,7 @@ urtwm_tx_data(struct urtwm_softc *sc, struct ieee80211_node *ni,
 	else if (m->m_flags & M_EAPOL)
 		rate = tp->mgmtrate;
 	else {
-		if (URTWM_CHIP_HAS_RATECTL(sc)) {
+		if (URTWM_USE_RATECTL(sc)) {
 			/* XXX pass pktlen */
 			(void) ieee80211_ratectl_rate(ni, NULL, 0);
 			rate = ni->ni_txrate;
@@ -3059,21 +3068,14 @@ urtwm_tx_data(struct urtwm_softc *sc, struct ieee80211_node *ni,
 			    tp->maxretry));
 		}
 
-#ifdef URTWM_TODO
 		struct urtwm_node *un = URTWM_NODE(ni);
 		macid = un->id;
-#endif
-		macid = URTWM_MACID_BSS;
 
 		if (type == IEEE80211_FC0_TYPE_DATA) {
 			qsel = tid % URTWM_MAX_TID;
 
-#ifdef URTWM_TODO
-			txd->txdw2 |= htole32(
-			    R88A_TXDW2_AGGBK |
-			    R88A_TXDW2_CCX_RPT);
-#endif
 			txd->txdw2 |= htole32(R88A_TXDW2_AGGBK);
+			txd->txdw2 |= htole32(R88A_TXDW2_SPE_RPT);
 
 			if (ic->ic_flags & IEEE80211_F_SHPREAMBLE)
 				txd->txdw5 |= htole32(R88A_TXDW5_SHPRE);
@@ -3105,13 +3107,10 @@ urtwm_tx_data(struct urtwm_softc *sc, struct ieee80211_node *ni,
 	txd->txdw4 |= htole32(SM(R88A_TXDW4_DATARATE, ridx));
 	urtwm_tx_raid(sc, txd, ni, ismcast);
 
-	/* XXX no rate adaptation yet. */
-#ifdef URTWM_TODO
 	/* Force this rate if needed. */
-	if (URTWM_CHIP_HAS_RATECTL(sc) || ismcast ||
+	if (URTWM_USE_RATECTL(sc) || ismcast ||
 	    (tp->ucastrate != IEEE80211_FIXED_RATE_NONE) ||
 	    (m->m_flags & M_EAPOL) || type != IEEE80211_FC0_TYPE_DATA)
-#endif
 		txd->txdw3 |= htole32(R88A_TXDW3_DRVRATE);
 
 	if (!hasqos) {
@@ -4766,68 +4765,62 @@ urtwm_update_mcast(struct ieee80211com *ic)
 	URTWM_UNLOCK(sc);
 }
 
-#ifdef URTWM_TODO
 static struct ieee80211_node *
-urtwn_node_alloc(struct ieee80211vap *vap,
+urtwm_node_alloc(struct ieee80211vap *vap,
     const uint8_t mac[IEEE80211_ADDR_LEN])
 {
-	struct urtwn_node *un;
+	struct urtwm_node *un;
 
-	un = malloc(sizeof (struct urtwn_node), M_80211_NODE,
+	un = malloc(sizeof (struct urtwm_node), M_80211_NODE,
 	    M_NOWAIT | M_ZERO);
 
 	if (un == NULL)
 		return NULL;
 
-	un->id = URTWN_MACID_UNDEFINED;
+	un->id = URTWM_MACID_UNDEFINED;
 
 	return &un->ni;
 }
 
 static void
-urtwn_newassoc(struct ieee80211_node *ni, int isnew)
+urtwm_newassoc(struct ieee80211_node *ni, int isnew)
 {
-	struct urtwn_softc *sc = ni->ni_ic->ic_softc;
-	struct urtwn_node *un = URTWN_NODE(ni);
+	struct urtwm_softc *sc = ni->ni_ic->ic_softc;
+	struct urtwm_node *un = URTWM_NODE(ni);
 	uint8_t id;
-
-	/* Only do this bit for R88E chips */
-	if (! (sc->chip & URTWN_CHIP_88E))
-		return;
 
 	if (!isnew)
 		return;
 
-	URTWN_NT_LOCK(sc);
-	for (id = 0; id <= URTWN_MACID_MAX(sc); id++) {
-		if (id != URTWN_MACID_BC && sc->node_list[id] == NULL) {
+	URTWM_NT_LOCK(sc);
+	for (id = 0; id <= URTWM_MACID_MAX(sc); id++) {
+		if (id != URTWM_MACID_BC && sc->node_list[id] == NULL) {
 			un->id = id;
 			sc->node_list[id] = ni;
 			break;
 		}
 	}
-	URTWN_NT_UNLOCK(sc);
+	URTWM_NT_UNLOCK(sc);
 
-	if (id > URTWN_MACID_MAX(sc)) {
+	if (id > URTWM_MACID_MAX(sc)) {
 		device_printf(sc->sc_dev, "%s: node table is full\n",
 		    __func__);
 	}
 }
 
 static void
-urtwn_node_free(struct ieee80211_node *ni)
+urtwm_node_free(struct ieee80211_node *ni)
 {
-	struct urtwn_softc *sc = ni->ni_ic->ic_softc;
-	struct urtwn_node *un = URTWN_NODE(ni);
+	struct urtwm_softc *sc = ni->ni_ic->ic_softc;
+	struct urtwm_node *un = URTWM_NODE(ni);
 
-	URTWN_NT_LOCK(sc);
-	if (un->id != URTWN_MACID_UNDEFINED)
+	URTWM_NT_LOCK(sc);
+	if (un->id != URTWM_MACID_UNDEFINED)
 		sc->node_list[un->id] = NULL;
-	URTWN_NT_UNLOCK(sc);
+	URTWM_NT_UNLOCK(sc);
 
 	sc->sc_node_free(ni);
 }
-#endif	/* URTWM_TODO */
 
 static void
 urtwm_set_chan(struct urtwm_softc *sc, struct ieee80211_channel *c)

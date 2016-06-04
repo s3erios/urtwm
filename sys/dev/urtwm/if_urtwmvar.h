@@ -83,19 +83,12 @@ struct urtwm_cmdq {
 };
 #define URTWM_CMDQ_SIZE			16
 
-#ifdef URTWM_TODO
-struct urtwm_fw_info {
-	const uint8_t		*data;
-	size_t			size;
-};
-
 struct urtwm_node {
 	struct ieee80211_node	ni;	/* must be the first */
 	uint8_t			id;
 	int			last_rssi;
 };
 #define URTWM_NODE(ni)	((struct urtwm_node *)(ni))
-#endif	/* URTWM_TODO */
 
 struct urtwm_vap {
 	struct ieee80211vap	vap;
@@ -135,7 +128,7 @@ struct urtwm_softc {
 	device_t		sc_dev;
 	struct usb_device	*sc_udev;
 
-#define URTWM_CHIP_HAS_RATECTL(sc)	(0)
+#define URTWM_USE_RATECTL(_sc)	!!((_sc)->sc_flags & URTWM_FW_LOADED)
 
 	uint32_t		sc_debug;
 	uint8_t			sc_iface_index;
@@ -184,6 +177,9 @@ struct urtwm_softc {
 	uint16_t		next_rom_addr;
 	uint32_t		keys_bmap;
 
+	struct ieee80211_node	*node_list[R8821A_MACID_MAX + 1];
+	struct mtx		nt_mtx;
+
 	struct mtx		sc_mtx;
 
 	struct urtwm_cmdq	cmdq[URTWM_CMDQ_SIZE];
@@ -199,6 +195,7 @@ struct urtwm_softc {
 	struct urtwm_rx_radiotap_header	sc_rxtap;
 	struct urtwm_tx_radiotap_header	sc_txtap;
 
+	void		(*sc_node_free)(struct ieee80211_node *);
 	void		(*sc_scan_curchan)(struct ieee80211_scan_state *,
 			    unsigned long);
 };
@@ -212,3 +209,9 @@ struct urtwm_softc {
 #define URTWM_CMDQ_LOCK(sc)		mtx_lock(&(sc)->cmdq_mtx)
 #define URTWM_CMDQ_UNLOCK(sc)		mtx_unlock(&(sc)->cmdq_mtx)
 #define URTWM_CMDQ_LOCK_DESTROY(sc)	mtx_destroy(&(sc)->cmdq_mtx)
+
+#define URTWM_NT_LOCK_INIT(sc) \
+	mtx_init(&(sc)->nt_mtx, "node table lock", NULL, MTX_DEF)
+#define URTWM_NT_LOCK(sc)		mtx_lock(&(sc)->nt_mtx)
+#define URTWM_NT_UNLOCK(sc)		mtx_unlock(&(sc)->nt_mtx)
+#define URTWM_NT_LOCK_DESTROY(sc)	mtx_destroy(&(sc)->nt_mtx)
