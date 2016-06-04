@@ -3467,10 +3467,6 @@ urtwm_power_off(struct urtwm_softc *sc)
 {
 	int ntries;
 
-	/* Disable any kind of TX reports. */
-	urtwm_setbits_1(sc, R88E_TX_RPT_CTRL,
-	    R88E_TX_RPT1_ENA | R88E_TX_RPT2_ENA, 0);
-
 	/* Stop Rx. */
 	urtwm_write_1(sc, R92C_CR, 0);
 
@@ -3794,7 +3790,6 @@ urtwm_dma_init(struct urtwm_softc *sc)
 	}
 
 	nqueues = 1 + hasnq + haslq;
-	npubqpages = nqpages = nrempages = pagecount = 0;
 	pagecount = R88A_TX_PAGE_COUNT;
 	npubqpages = R88A_PUBQ_NPAGES;
 	tx_boundary = R88A_TX_PAGE_BOUNDARY;
@@ -5202,16 +5197,6 @@ urtwm_init(struct urtwm_softc *sc)
 
 	urtwm_write_1(sc, R88A_EARLY_MODE_CONTROL + 3, 0x01);
 
-	/* XXX TODO: enable TX report. */
-#ifdef URTWM_TODO
-	urtwm_write_1(sc, R92C_FWHW_TXQ_CTRL + 1, 0x0f);
-
-	/* XXX vendor driver sets only RPT2. */
-	urtwm_setbits_1(sc, R88E_TX_RPT_CTRL,
-	    R88E_TX_RPT1_ENA | R88E_TX_RPT2_ENA);
-
-	urtwm_write_2(sc, R88E_TX_RPT_TIME, 0x3df0);
-#endif
 	/* Initialize MRR. */
 	urtwm_mrr_init(sc);
 
@@ -5227,11 +5212,6 @@ urtwm_init(struct urtwm_softc *sc)
 #endif
 
 	urtwm_write_1(sc, R92C_USB_HRPWM, 0);
-
-#ifdef URTWM_TODO
-	/* ACK for xmit management frames. */
-	urtwm_setbits_1_shift(sc, R92C_FWHW_TXQ_CTRL, 0, 0x10, 1);
-#endif
 
 	usbd_transfer_start(sc->sc_xfer[URTWM_BULK_RX]);
 
