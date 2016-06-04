@@ -5189,15 +5189,6 @@ urtwm_init(struct urtwm_softc *sc)
 		urtwm_setbits_1(sc, R88A_RXDMA_PRO, 0x10, 0x20);
 	}
 
-	/* Reset 8051. */
-	/* XXX vendor driver contains bug here (results in noop). */
-#ifdef rtl8812a_behavior
-	urtwm_setbits_1(sc, R92C_SYS_FUNC_EN, R92C_SYS_FUNC_EN_CPUEN, 0);
-#else
-	urtwm_setbits_1_shift(sc, R92C_SYS_FUNC_EN, R92C_SYS_FUNC_EN_CPUEN,
-	    0, 1);
-#endif
-
 	/* Enable single packet AMPDU. */
 	urtwm_setbits_1(sc, R88A_HT_SINGLE_AMPDU, 0,
 	    R88A_HT_SINGLE_AMPDU_PKT_ENA);
