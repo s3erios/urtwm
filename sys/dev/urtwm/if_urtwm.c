@@ -295,6 +295,7 @@ static int		urtwm_cam_write(struct urtwm_softc *, uint32_t,
 			    uint32_t);
 static void		urtwm_rxfilter_init(struct urtwm_softc *);
 static void		urtwm_edca_init(struct urtwm_softc *);
+static void		urtwm_mrr_init(struct urtwm_softc *);
 static void		urtwm_write_txpower(struct urtwm_softc *, int,
 			    struct ieee80211_channel *, uint16_t[]);
 static int		urtwm_get_power_group(struct urtwm_softc *,
@@ -4288,6 +4289,16 @@ urtwm_edca_init(struct urtwm_softc *sc)
 }
 
 static void
+urtwm_mrr_init(struct urtwm_softc *sc)
+{
+	int i;
+
+	/* Drop rate index by 1 per retry. */
+	for (i = 0; i < R88A_MRR_SIZE; i++)
+		urtwm_write_1(sc, R92C_DARFRC + i, i + 1);
+}
+
+static void
 urtwm_write_txpower(struct urtwm_softc *sc, int chain,
     struct ieee80211_channel *c, uint16_t power[URTWM_RIDX_COUNT])
 {
@@ -5273,6 +5284,8 @@ urtwm_init(struct urtwm_softc *sc)
 
 	urtwm_write_2(sc, R88E_TX_RPT_TIME, 0x3df0);
 #endif
+	/* Initialize MRR. */
+	urtwm_mrr_init(sc);
 
 	/* Reset USB mode switch setting. */
 	urtwm_write_1(sc, R88A_SDIO_CTRL, 0);

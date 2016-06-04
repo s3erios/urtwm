@@ -1321,6 +1321,7 @@ struct r88e_tx_rpt_ccx {
 } __packed;
 
 #define	R88A_INTR_MSG_LEN	60
+#define R88A_MRR_SIZE		8
 
 
 static const uint8_t ridx2rate[] =
