@@ -920,6 +920,9 @@ urtwm_rxeof(struct urtwm_softc *sc, uint8_t *buf, int len)
 				m = m->m_next;
 		}
 
+		/* Next chunk is 8-byte aligned. */
+		if (totlen < len)
+			totlen = roundup2(totlen, 8);
 		buf += totlen;
 		len -= totlen;
 	}
