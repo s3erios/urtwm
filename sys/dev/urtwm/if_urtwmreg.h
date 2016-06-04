@@ -933,11 +933,19 @@
 #define R92C_CAM_MACLO_S	16
 
 /* Rate adaptation modes. */
-#define R92C_RAID_11GN	1
-#define R92C_RAID_11N	3
-#define R92C_RAID_11BG	4
-#define R92C_RAID_11G	5	/* "pure" 11g */
-#define R92C_RAID_11B	6
+#define R88A_RAID_11BGN_2_40	0
+#define R88A_RAID_11BGN_1_40	1
+#define R88A_RAID_11BGN_2	2
+#define R88A_RAID_11BGN_1	3
+#define R88A_RAID_11GN_2	4
+#define R88A_RAID_11GN_1	5
+#define R88A_RAID_11BG		6
+#define R88A_RAID_11G		7	/* "pure" 11g */
+#define R88A_RAID_11B		8
+#define R88A_RAID_11AC_2_80	9
+#define R88A_RAID_11AC_1_80	10
+#define R88A_RAID_11AC_1	11
+#define R88A_RAID_11AC_2	12
 
 
 /*

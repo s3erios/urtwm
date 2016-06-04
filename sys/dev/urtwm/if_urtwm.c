@@ -255,6 +255,9 @@ static int8_t		urtwm_get_rssi_ofdm(struct urtwm_softc *, void *);
 static int8_t		urtwm_get_rssi(struct urtwm_softc *, int, void *);
 static void		urtwm_tx_protection(struct urtwm_softc *,
 			    struct r88a_tx_desc *, enum ieee80211_protmode);
+static void		urtwm_tx_raid(struct urtwm_softc *,
+			    struct r88a_tx_desc *, struct ieee80211_node *,
+			    int);
 static int		urtwm_tx_data(struct urtwm_softc *,
 			    struct ieee80211_node *, struct mbuf *,
 			    struct urtwm_data *);
@@ -2890,6 +2893,81 @@ urtwm_tx_protection(struct urtwm_softc *sc, struct r88a_tx_desc *txd,
 	}
 }
 
+static void
+urtwm_tx_raid(struct urtwm_softc *sc, struct r88a_tx_desc *txd,
+    struct ieee80211_node *ni, int ismcast)
+{
+	struct ieee80211com *ic = &sc->sc_ic;
+	struct ieee80211_channel *c = ic->ic_curchan;
+	enum ieee80211_phymode mode;
+	uint8_t raid;
+
+	mode = ic->ic_curmode;
+	if (mode == IEEE80211_MODE_AUTO)
+		mode = ieee80211_chan2mode(c);
+
+	/* NB: group addressed frames are done at 11bg rates for now */
+	/*
+	 * XXX TODO: this should be per-node, for 11b versus 11bg
+	 * nodes in hostap mode
+	 */
+	if (ismcast || !(ni->ni_flags & IEEE80211_NODE_HT)) {
+		switch (mode) {
+		case IEEE80211_MODE_11A:
+		case IEEE80211_MODE_11B:
+		case IEEE80211_MODE_11G:
+			break;
+		case IEEE80211_MODE_11NA:
+			mode = IEEE80211_MODE_11A;
+			break;
+		case IEEE80211_MODE_11NG:
+			mode = IEEE80211_MODE_11G;
+			break;
+		default:
+			device_printf(sc->sc_dev, "unknown mode(1) %d!\n",
+			    ic->ic_curmode);
+			return;
+		}
+	}
+
+	switch (mode) {
+	case IEEE80211_MODE_11A:
+		raid = R88A_RAID_11G;
+		break;
+	case IEEE80211_MODE_11B:
+		raid = R88A_RAID_11B;
+		break;
+	case IEEE80211_MODE_11G:
+		raid = R88A_RAID_11BG;
+		break;
+	case IEEE80211_MODE_11NA:
+		if (sc->ntxchains == 1)
+			raid = R88A_RAID_11GN_1;
+		else
+			raid = R88A_RAID_11GN_2;
+		break;
+	case IEEE80211_MODE_11NG:
+		if (sc->ntxchains == 1) {
+			if (IEEE80211_IS_CHAN_HT40(c))
+				raid = R88A_RAID_11BGN_1_40;
+			else
+				raid = R88A_RAID_11BGN_1;
+		} else {
+			if (IEEE80211_IS_CHAN_HT40(c))
+				raid = R88A_RAID_11BGN_2_40;
+			else
+				raid = R88A_RAID_11BGN_2;
+		}
+		break;
+	default:
+		/* TODO: 80 MHz / 11ac */
+		device_printf(sc->sc_dev, "unknown mode(2) %d!\n", mode);
+		return;
+	}
+
+	txd->txdw1 |= htole32(SM(R88A_TXDW1_RAID, raid));
+}
+
 static int
 urtwm_tx_data(struct urtwm_softc *sc, struct ieee80211_node *ni,
     struct mbuf *m, struct urtwm_data *data)
@@ -3025,6 +3103,7 @@ urtwm_tx_data(struct urtwm_softc *sc, struct ieee80211_node *ni,
 
 	txd->txdw1 |= htole32(SM(R88A_TXDW1_MACID, macid));
 	txd->txdw4 |= htole32(SM(R88A_TXDW4_DATARATE, ridx));
+	urtwm_tx_raid(sc, txd, ni, ismcast);
 
 	/* XXX no rate adaptation yet. */
 #ifdef URTWM_TODO
@@ -3090,6 +3169,7 @@ urtwm_tx_raw(struct urtwm_softc *sc, struct ieee80211_node *ni,
 	struct ieee80211_frame *wh;
 	struct r88a_tx_desc *txd;
 	uint8_t cipher, ridx, type;
+	int ismcast;
 
 	/* Encrypt the frame if need be. */
 	cipher = R88A_TXDW1_CIPHER_NONE;
@@ -3121,6 +3201,7 @@ urtwm_tx_raw(struct urtwm_softc *sc, struct ieee80211_node *ni,
 
 	wh = mtod(m, struct ieee80211_frame *);
 	type = wh->i_fc[0] & IEEE80211_FC0_TYPE_MASK;
+	ismcast = IEEE80211_IS_MULTICAST(wh->i_addr1);
 
 	/* Fill Tx descriptor. */
 	txd = (struct r88a_tx_desc *)data->buf;
@@ -3128,7 +3209,7 @@ urtwm_tx_raw(struct urtwm_softc *sc, struct ieee80211_node *ni,
 
 	txd->offset = sizeof(*txd);
 	txd->flags0 |= R88A_FLAGS0_LSG | R88A_FLAGS0_FSG | R88A_FLAGS0_OWN;
-	if (IEEE80211_IS_MULTICAST(wh->i_addr1))
+	if (ismcast)
 		txd->flags0 |= R88A_FLAGS0_BMCAST;
 
 	if ((params->ibp_flags & IEEE80211_BPF_NOACK) == 0) {
@@ -3152,6 +3233,7 @@ urtwm_tx_raw(struct urtwm_softc *sc, struct ieee80211_node *ni,
 	txd->txdw4 |= htole32(SM(R88A_TXDW4_DATARATE, ridx));
 	txd->txdw4 |= htole32(SM(R88A_TXDW4_DATARATE_FB_LMT, 0x1f));
 	txd->txdw3 |= htole32(R88A_TXDW3_DRVRATE);
+	urtwm_tx_raid(sc, txd, ni, ismcast);
 
 	if (!IEEE80211_QOS_HAS_SEQ(wh)) {
 		/* Use HW sequence numbering for non-QoS frames. */
