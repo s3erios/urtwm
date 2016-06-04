@@ -142,6 +142,7 @@ struct urtwm_softc {
 	uint8_t			sc_flags;
 #define URTWM_DETACHED	0x01
 #define URTWM_RUNNING	0x02
+#define URTWM_FW_LOADED	0x08
 
 	uint8_t			pa_type;
 	uint8_t			lna_type;

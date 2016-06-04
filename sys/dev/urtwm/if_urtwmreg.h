@@ -852,6 +852,7 @@
  */
 #define R92C_FW_START_ADDR	0x1000
 #define R92C_FW_PAGE_SIZE	4096
+#define R92C_FW_MAX_BLOCK_SIZE_USB	196
 
 
 /*
@@ -991,53 +992,45 @@ struct r92c_fw_hdr {
 /*
  * Host to firmware commands.
  */
-struct r92c_fw_cmd {
-	uint8_t	id;
-#define R92C_CMD_AP_OFFLOAD		0
-#define R92C_CMD_SET_PWRMODE		1
-#define R92C_CMD_JOINBSS_RPT		2
-#define R92C_CMD_RSVD_PAGE		3
-#define R92C_CMD_RSSI			4
-#define R92C_CMD_RSSI_SETTING		5
-#define R92C_CMD_MACID_CONFIG		6
-#define R92C_CMD_MACID_PS_MODE		7
-#define R92C_CMD_P2P_PS_OFFLOAD		8
-#define R92C_CMD_SELECTIVE_SUSPEND	9
-#define R92C_CMD_FLAG_EXT		0x80
-
-	uint8_t	msg[5];
-} __packed;
-
 struct r88e_fw_cmd {
 	uint8_t id;
 #define	R88E_CMD_MACID_CONFIG		0x40
+#define R88A_CMD_IQ_CALIBRATE		0x45
+
 	uint8_t msg[7];
 } __packed;
 
-/* Structure for R92C_CMD_RSVD_PAGE. */
-struct r92c_fw_cmd_rsvd_page {
-	uint8_t probe_resp;
-	uint8_t ps_poll;
-	uint8_t null_data;
-} __packed;
-
-/* Structure for R92C_CMD_RSSI_SETTING. */
-struct r92c_fw_cmd_rssi {
-	uint8_t	macid;
-	uint8_t	reserved;
-	uint8_t	pwdb;
-} __packed;
-
-/* Structure for R92C_CMD_MACID_CONFIG. */
+/* Structure for R88A_CMD_MACID_CONFIG. */
+#ifdef URTWM_TODO
 struct r92c_fw_cmd_macid_cfg {
 	uint32_t	mask;
 	uint8_t		macid;
-#define URTWM_MACID_BC		0	/* Broadcast. */
-#define URTWM_MACID_BSS		12
-#define R88A_MACID_MAX		63
-#define URTWM_MACID_MAX(sc)	R88A_MACID_MAX
+#endif
+#define URTWM_MACID_BC		1	/* Broadcast. */
+#define URTWM_MACID_BSS		0
+#define R8812A_MACID_MAX	31
+#define R8821A_MACID_MAX	63
+#define URTWM_MACID_MAX(sc)	R8821A_MACID_MAX	/* XXX */
 #define URTWM_MACID_UNDEFINED	(uint8_t)-1
 #define URTWM_MACID_VALID	0x80
+#ifdef URTWM_TODO
+} __packed;
+#endif
+
+/* Structure for R88A_CMD_IQ_CALIBRATE. */
+struct r88a_fw_cmd_iq_calib {
+	uint8_t		chan;
+	uint8_t		band_bw;
+#define URTWM_CMD_IQ_CHAN_WIDTH_20	0x01
+#define URTWM_CMD_IQ_CHAN_WIDTH_40	0x02
+#define URTWM_CMD_IQ_CHAN_WIDTH_80	0x04
+#define URTWM_CMD_IQ_CHAN_WIDTH_160	0x08
+#define URTWM_CMD_IQ_BAND_2GHZ		0x10
+#define URTWM_CMD_IQ_BAND_5GHZ		0x20
+
+	uint8_t		ext_5g_pa_lna;
+#define URTWM_CMD_IQ_EXT_PA_5G(pa)	(pa)
+#define URTWM_CMD_IQ_EXT_LNA_5G(lna)	((lna) << 1)
 } __packed;
 
 
@@ -1159,6 +1152,7 @@ struct r92c_rx_stat {
 	uint32_t	rxdw2;
 #define R92C_RXDW2_PKTCNT_M	0x00ff0000
 #define R92C_RXDW2_PKTCNT_S	16
+#define R88A_RXDW2_RPT_C2H	0x10000000
 
 	uint32_t	rxdw3;
 #define R92C_RXDW3_RATE_M	0x0000003f
@@ -1214,6 +1208,45 @@ struct r88e_rx_cck {
 	uint8_t		sig_evm;
 } __packed;
 
+/* C2H event types. */
+#define R88A_C2H_DEBUG		0x00
+#define R88A_C2H_TX_REPORT	0x03
+#define R88A_C2H_BT_INFO	0x09
+#define R88A_C2H_RA_REPORT	0x0c
+#define R88A_C2H_IQK_FINISHED	0x11
+
+/* Structure for R88A_C2H_TX_REPORT event. */
+struct r88a_c2h_tx_rpt {
+	uint8_t		txrptb0;
+#define R88A_TXRPTB0_QSEL_M		0x1f
+#define R88A_TXRPTB0_QSEL_S		0
+#define R88A_TXRPTB0_BC			0x20
+#define R88A_TXRPTB0_LIFE_EXPIRE	0x40
+#define R88A_TXRPTB0_RETRY_OVER		0x80
+
+	uint8_t		macid;
+	uint8_t		txrptb2;
+#define R88A_TXRPTB2_RETRY_CNT_M	0x3f
+#define R88A_TXRPTB2_RETRY_CNT_S	0
+
+	uint16_t	queue_time;	/* 256 msec unit */
+	uint8_t		final_rate;
+	uint16_t	reserved;
+} __packed;
+
+/* Structure for R88A_C2H_RA_REPORT event. */
+struct r88a_c2h_ra_report {
+	uint8_t		rarptb0;
+#define R88A_RARPTB0_RATE_M	0x3f
+#define R88A_RARPTB0_RATE_S	0
+
+	uint8_t		macid;
+	uint8_t		rarptb2;
+#define R88A_RARPTB0_LDPC	0x01
+#define R88A_RARPTB0_TXBF	0x02
+#define R88A_RARPTB0_NOISE	0x04
+} __packed;
+
 /* Tx MAC descriptor. */
 struct r88a_tx_desc {
 	uint16_t	pktlen;
@@ -1254,7 +1287,7 @@ struct r88a_tx_desc {
 #define R88A_TXDW2_AGGEN	0x00001000
 #define R88A_TXDW2_AGGBK	0x00010000
 #define R88A_TXDW2_MOREFRAG	0x00020000
-#define R88A_TXDW2_CCX_RPT	0x00080000
+#define R88A_TXDW2_SPE_RPT	0x00080000
 
 	uint32_t	txdw3;
 #define R88A_TXDW3_DRVRATE	0x00000100
@@ -1295,30 +1328,6 @@ struct r88a_tx_desc {
 #define R88A_TXDW9_SEQ_M	0x00fff000
 #define R88A_TXDW9_SEQ_S	12
 } __packed __attribute__((aligned(4)));
-
-struct r88e_tx_rpt_ccx {
-	uint8_t		rptb0;
-	uint8_t		rptb1;
-#define R88E_RPTB1_MACID_M	0x3f
-#define R88E_RPTB1_MACID_S	0
-#define R88E_RPTB1_PKT_OK	0x40
-#define R88E_RPTB1_BMC		0x80
-
-	uint8_t		rptb2;
-#define R88E_RPTB2_RETRY_CNT_M	0x3f
-#define R88E_RPTB2_RETRY_CNT_S	0
-#define R88E_RPTB2_LIFE_EXPIRE	0x40
-#define R88E_RPTB2_RETRY_OVER	0x80
-
-	uint8_t		rptb3;
-	uint8_t		rptb4;
-	uint8_t		rptb5;
-	uint8_t		rptb6;
-#define R88E_RPTB6_QSEL_M	0xf0
-#define R88E_RPTB6_QSEL_S	4
-
-	uint8_t		rptb7;
-} __packed;
 
 #define	R88A_INTR_MSG_LEN	60
 #define R88A_MRR_SIZE		8

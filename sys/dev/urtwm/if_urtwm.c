@@ -274,14 +274,12 @@ static void		urtwm_parent(struct ieee80211com *);
 static int		urtwm_power_on(struct urtwm_softc *);
 static void		urtwm_power_off(struct urtwm_softc *);
 static int		urtwm_llt_init(struct urtwm_softc *);
-#ifdef URTWM_TODO
 #ifndef URTWM_WITHOUT_UCODE
 static void		urtwm_fw_reset(struct urtwm_softc *);
-static void		urtwm_r88e_fw_reset(struct urtwm_softc *);
-static int		urtwm_fw_loadpage(struct urtwm_softc *, int,
+static usb_error_t	urtwm_fw_loadpage(struct urtwm_softc *, int,
 			    const uint8_t *, int);
+static int		urtwm_fw_checksum_report(struct urtwm_softc *);
 static int		urtwm_load_firmware(struct urtwm_softc *);
-#endif
 #endif
 static int		urtwm_dma_init(struct urtwm_softc *);
 static int		urtwm_mac_init(struct urtwm_softc *);
@@ -1524,14 +1522,14 @@ urtwm_setbits_4(struct urtwm_softc *sc, uint16_t addr, uint32_t clr,
 
 #ifdef URTWM_TODO
 static int
-urtwn_fw_cmd(struct urtwm_softc *sc, uint8_t id, const void *buf, int len)
+urtwm_fw_cmd(struct urtwm_softc *sc, uint8_t id, const void *buf, int len)
 {
-	struct r92c_fw_cmd cmd;
+	struct r88e_fw_cmd cmd;
 	usb_error_t error;
 	int ntries;
 
-	if (!(sc->sc_flags & URTWN_FW_LOADED)) {
-		URTWN_DPRINTF(sc, URTWN_DEBUG_FIRMWARE, "%s: firmware "
+	if (!(sc->sc_flags & URTWM_FW_LOADED)) {
+		URTWM_DPRINTF(sc, URTWM_DEBUG_FIRMWARE, "%s: firmware "
 		    "was not loaded; command (id %d) will be discarded\n",
 		    __func__, id);
 		return (0);
@@ -1539,9 +1537,9 @@ urtwn_fw_cmd(struct urtwm_softc *sc, uint8_t id, const void *buf, int len)
 
 	/* Wait for current FW box to be empty. */
 	for (ntries = 0; ntries < 100; ntries++) {
-		if (!(urtwn_read_1(sc, R92C_HMETFR) & (1 << sc->fwcur)))
+		if (!(urtwm_read_1(sc, R92C_HMETFR) & (1 << sc->fwcur)))
 			break;
-		urtwn_ms_delay(sc);
+		urtwm_delay(sc, 2000);
 	}
 	if (ntries == 100) {
 		device_printf(sc->sc_dev,
@@ -1550,24 +1548,22 @@ urtwn_fw_cmd(struct urtwm_softc *sc, uint8_t id, const void *buf, int len)
 	}
 	memset(&cmd, 0, sizeof(cmd));
 	cmd.id = id;
-	if (len > 3)
-		cmd.id |= R92C_CMD_FLAG_EXT;
-	KASSERT(len <= sizeof(cmd.msg), ("urtwn_fw_cmd\n"));
+	KASSERT(len <= sizeof(cmd.msg), ("urtwm_fw_cmd\n"));
 	memcpy(cmd.msg, buf, len);
 
 	/* Write the first word last since that will trigger the FW. */
 	if (len > 3) {
-		error = urtwn_write_2(sc, R92C_HMEBOX_EXT(sc->fwcur),
-		    *(uint16_t *)((uint8_t *)&cmd + 4));
+		error = urtwm_write_4(sc, R88E_HMEBOX_EXT(sc->fwcur),
+		    *(uint32_t *)((uint8_t *)&cmd + 4));
 		if (error != USB_ERR_NORMAL_COMPLETION)
 			return (EIO);
 	}
-	error = urtwn_write_4(sc, R92C_HMEBOX(sc->fwcur),
-	    *(uint32_t *)&cmd);
+	error = urtwm_write_4(sc, R92C_HMEBOX(sc->fwcur), *(uint32_t *)&cmd);
 	if (error != USB_ERR_NORMAL_COMPLETION)
 		return (EIO);
 
 	sc->fwcur = (sc->fwcur + 1) % R92C_H2C_NBOX;
+
 	return (0);
 }
 #endif	/* URTWM_TODO */
@@ -3559,7 +3555,11 @@ urtwm_power_off(struct urtwm_softc *sc)
 	/* Respond TxOK to scheduler */
 	urtwm_setbits_1(sc, R92C_DUAL_TSF_RST, 0, R92C_DUAL_TSF_RST_TXOK);
 
-	/* firmware reset code resides here. */
+	/* If firmware in ram code, do reset. */
+#ifndef URTWM_WITHOUT_UCODE
+	if (urtwm_read_1(sc, R92C_MCUFWDL) & R92C_MCUFWDL_RDY)  
+		urtwm_fw_reset(sc);
+#endif
 
 	/* Reset MCU. */
 	urtwm_setbits_1_shift(sc, R92C_SYS_FUNC_EN, R92C_SYS_FUNC_EN_CPUEN,
@@ -3639,59 +3639,45 @@ urtwm_llt_init(struct urtwm_softc *sc)
 	return (error);
 }
 
-#ifdef URTWM_TODO
-#ifndef URTWN_WITHOUT_UCODE
+#ifndef URTWM_WITHOUT_UCODE
 static void
-urtwn_fw_reset(struct urtwn_softc *sc)
+urtwm_fw_reset(struct urtwm_softc *sc)
 {
-	uint16_t reg;
-	int ntries;
 
-	/* Tell 8051 to reset itself. */
-	urtwn_write_1(sc, R92C_HMETFR + 3, 0x20);
+	/* Reset MCU IO wrapper. */
+	urtwm_setbits_1(sc, R92C_RSV_CTRL + 1, 0x01, 0);
 
-	/* Wait until 8051 resets by itself. */
-	for (ntries = 0; ntries < 100; ntries++) {
-		reg = urtwn_read_2(sc, R92C_SYS_FUNC_EN);
-		if (!(reg & R92C_SYS_FUNC_EN_CPUEN))
-			return;
-		urtwn_ms_delay(sc);
-	}
-	/* Force 8051 reset. */
-	urtwn_write_2(sc, R92C_SYS_FUNC_EN, reg & ~R92C_SYS_FUNC_EN_CPUEN);
+	urtwm_setbits_1_shift(sc, R92C_SYS_FUNC_EN,
+	    R92C_SYS_FUNC_EN_CPUEN, 0, 1);
+
+	/* Enable MCU IO wrapper. */
+	urtwm_setbits_1(sc, R92C_RSV_CTRL + 1, 0, 0x01);
+
+	urtwm_setbits_1_shift(sc, R92C_SYS_FUNC_EN,
+	    0, R92C_SYS_FUNC_EN_CPUEN, 1);
 }
 
-static void
-urtwn_r88e_fw_reset(struct urtwn_softc *sc)
-{
-	uint16_t reg;
-
-	reg = urtwn_read_2(sc, R92C_SYS_FUNC_EN);
-	urtwn_write_2(sc, R92C_SYS_FUNC_EN, reg & ~R92C_SYS_FUNC_EN_CPUEN);
-	urtwn_write_2(sc, R92C_SYS_FUNC_EN, reg | R92C_SYS_FUNC_EN_CPUEN);
-}
-
-static int
-urtwn_fw_loadpage(struct urtwn_softc *sc, int page, const uint8_t *buf, int len)
+static usb_error_t
+urtwm_fw_loadpage(struct urtwm_softc *sc, int page, const uint8_t *buf, int len)
 {
 	uint32_t reg;
 	usb_error_t error = USB_ERR_NORMAL_COMPLETION;
 	int off, mlen;
 
-	reg = urtwn_read_4(sc, R92C_MCUFWDL);
+	reg = urtwm_read_4(sc, R92C_MCUFWDL);
 	reg = RW(reg, R92C_MCUFWDL_PAGE, page);
-	urtwn_write_4(sc, R92C_MCUFWDL, reg);
+	urtwm_write_4(sc, R92C_MCUFWDL, reg);
 
 	off = R92C_FW_START_ADDR;
 	while (len > 0) {
-		if (len > 196)
-			mlen = 196;
+		if (len > R92C_FW_MAX_BLOCK_SIZE_USB)
+			mlen = R92C_FW_MAX_BLOCK_SIZE_USB;
 		else if (len > 4)
 			mlen = 4;
 		else
 			mlen = 1;
 		/* XXX fix this deconst */
-		error = urtwn_write_region_1(sc, off,
+		error = urtwm_write_region_1(sc, off,
 		    __DECONST(uint8_t *, buf), mlen);
 		if (error != USB_ERR_NORMAL_COMPLETION)
 			break;
@@ -3703,28 +3689,40 @@ urtwn_fw_loadpage(struct urtwn_softc *sc, int page, const uint8_t *buf, int len)
 }
 
 static int
-urtwn_load_firmware(struct urtwn_softc *sc)
+urtwm_fw_checksum_report(struct urtwm_softc *sc)
+{
+	int ntries;
+
+	for (ntries = 0; ntries < 25; ntries++) {
+		if (urtwm_read_4(sc, R92C_MCUFWDL) & R92C_MCUFWDL_CHKSUM_RPT)
+			break;
+		urtwm_delay(sc, 10000);
+	}
+	if (ntries == 25) {
+		URTWM_DPRINTF(sc, URTWM_DEBUG_FIRMWARE,
+		    "timeout waiting for checksum report\n");
+		return (ETIMEDOUT);
+	}
+
+	return (0);
+}
+
+static int
+urtwm_load_firmware(struct urtwm_softc *sc)
 {
 	const struct firmware *fw;
 	const struct r92c_fw_hdr *hdr;
 	const char *imagename;
-	const u_char *ptr;
-	size_t len;
-	uint32_t reg;
+	const u_char *ptr, *ptr2;
+	size_t len, len2;
 	int mlen, ntries, page, error;
 
-	URTWN_UNLOCK(sc);
 	/* Read firmware image from the filesystem. */
-	if (sc->chip & URTWN_CHIP_88E)
-		imagename = "urtwn-rtl8188eufw";
-	else if ((sc->chip & (URTWN_CHIP_UMC_A_CUT | URTWN_CHIP_92C)) ==
-		    URTWN_CHIP_UMC_A_CUT)
-		imagename = "urtwn-rtl8192cfwU";
-	else
-		imagename = "urtwn-rtl8192cfwT";
+	imagename = "urtwm-rtl8821aufw";
 
+	URTWM_UNLOCK(sc);
 	fw = firmware_get(imagename);
-	URTWN_LOCK(sc);
+	URTWM_LOCK(sc);
 	if (fw == NULL) {
 		device_printf(sc->sc_dev,
 		    "failed loadfirmware of file %s\n", imagename);
@@ -3732,7 +3730,6 @@ urtwn_load_firmware(struct urtwn_softc *sc)
 	}
 
 	len = fw->datasize;
-
 	if (len < sizeof(*hdr)) {
 		device_printf(sc->sc_dev, "firmware too short\n");
 		error = EINVAL;
@@ -3741,10 +3738,9 @@ urtwn_load_firmware(struct urtwn_softc *sc)
 	ptr = fw->data;
 	hdr = (const struct r92c_fw_hdr *)ptr;
 	/* Check if there is a valid FW header and skip it. */
-	if ((le16toh(hdr->signature) >> 4) == 0x88c ||
-	    (le16toh(hdr->signature) >> 4) == 0x88e ||
-	    (le16toh(hdr->signature) >> 4) == 0x92c) {
-		URTWN_DPRINTF(sc, URTWN_DEBUG_FIRMWARE,
+	if ((le16toh(hdr->signature) >> 4) == 0x210 ||	/* 8821 */
+	    (le16toh(hdr->signature) >> 4) == 0x950) {	/* 8812 */
+		URTWM_DPRINTF(sc, URTWM_DEBUG_FIRMWARE,
 		    "FW V%d.%d %02d-%02d %02d:%02d\n",
 		    le16toh(hdr->version), le16toh(hdr->subversion),
 		    hdr->month, hdr->date, hdr->hour, hdr->minute);
@@ -3752,73 +3748,56 @@ urtwn_load_firmware(struct urtwn_softc *sc)
 		len -= sizeof(*hdr);
 	}
 
-	if (urtwn_read_1(sc, R92C_MCUFWDL) & R92C_MCUFWDL_RAM_DL_SEL) {
-		if (sc->chip & URTWN_CHIP_88E)
-			urtwn_r88e_fw_reset(sc);
-		else
-			urtwn_fw_reset(sc);
-		urtwn_write_1(sc, R92C_MCUFWDL, 0);
+	if (urtwm_read_1(sc, R92C_MCUFWDL) & R92C_MCUFWDL_RAM_DL_SEL) {
+		urtwm_write_1(sc, R92C_MCUFWDL, 0);
+		urtwm_fw_reset(sc);
 	}
 
-	if (!(sc->chip & URTWN_CHIP_88E)) {
-		urtwn_write_2(sc, R92C_SYS_FUNC_EN,
-		    urtwn_read_2(sc, R92C_SYS_FUNC_EN) |
-		    R92C_SYS_FUNC_EN_CPUEN);
-	}
-	urtwn_write_1(sc, R92C_MCUFWDL,
-	    urtwn_read_1(sc, R92C_MCUFWDL) | R92C_MCUFWDL_EN);
-	urtwn_write_1(sc, R92C_MCUFWDL + 2,
-	    urtwn_read_1(sc, R92C_MCUFWDL + 2) & ~0x08);
+	/* MCU firmware download enable. */
+	urtwm_setbits_1(sc, R92C_MCUFWDL, 0, R92C_MCUFWDL_EN);
+	/* 8051 reset. */
+	urtwm_setbits_1(sc, R92C_MCUFWDL + 2, 0x08, 0);
 
-	/* Reset the FWDL checksum. */
-	urtwn_write_1(sc, R92C_MCUFWDL,
-	    urtwn_read_1(sc, R92C_MCUFWDL) | R92C_MCUFWDL_CHKSUM_RPT);
+	for (ntries = 0; ntries < 3; ntries++) {
+		ptr2 = ptr;
+		len2 = len;	/* XXX optimize */
 
-	for (page = 0; len > 0; page++) {
-		mlen = min(len, R92C_FW_PAGE_SIZE);
-		error = urtwn_fw_loadpage(sc, page, ptr, mlen);
-		if (error != 0) {
-			device_printf(sc->sc_dev,
-			    "could not load firmware page\n");
-			goto fail;
+		/* Reset the FWDL checksum. */
+		urtwm_setbits_1(sc, R92C_MCUFWDL, 0, R92C_MCUFWDL_CHKSUM_RPT);
+
+		for (page = 0; len2 > 0; page++) {
+			mlen = min(len2, R92C_FW_PAGE_SIZE);
+			error = urtwm_fw_loadpage(sc, page, ptr2, mlen);
+			if (error != 0) {
+				URTWM_DPRINTF(sc, URTWM_DEBUG_FIRMWARE,
+				    "could not load firmware page (try %d)\n",
+				    ntries);
+				continue;
+			}
+			ptr2 += mlen;
+			len2 -= mlen;
 		}
-		ptr += mlen;
-		len -= mlen;
-	}
-	urtwn_write_1(sc, R92C_MCUFWDL,
-	    urtwn_read_1(sc, R92C_MCUFWDL) & ~R92C_MCUFWDL_EN);
-	urtwn_write_1(sc, R92C_MCUFWDL + 1, 0);
 
-	if (!(sc->chip & URTWN_CHIP_88E)) { 
 		/* Wait for checksum report. */
-		for (ntries = 0; ntries < 1000; ntries++) {
-			if (urtwn_read_4(sc, R92C_MCUFWDL) &
-			    R92C_MCUFWDL_CHKSUM_RPT)
-				break;
-			urtwn_ms_delay(sc);
-		}
-		if (ntries == 1000) {
-			device_printf(sc->sc_dev,
-			    "timeout waiting for checksum report\n");
-			error = ETIMEDOUT;
-			goto fail;
-		}
+		if (urtwm_fw_checksum_report(sc) == 0)
+			break;
 	}
 
-	reg = urtwn_read_4(sc, R92C_MCUFWDL);
-	reg = (reg & ~R92C_MCUFWDL_WINTINI_RDY) | R92C_MCUFWDL_RDY;
-	urtwn_write_4(sc, R92C_MCUFWDL, reg);
-	if (sc->chip & URTWN_CHIP_88E)
-		urtwn_r88e_fw_reset(sc);
-	/* Wait for checksum report / firmware readiness. */
-	for (ntries = 0; ntries < 1000; ntries++) {
-		if ((urtwn_read_4(sc, R92C_MCUFWDL) &
-		    (R92C_MCUFWDL_WINTINI_RDY | R92C_MCUFWDL_CHKSUM_RPT)) ==
-		    (R92C_MCUFWDL_WINTINI_RDY | R92C_MCUFWDL_CHKSUM_RPT))
+	/* MCU download disable. */
+	urtwm_setbits_1(sc, R92C_MCUFWDL, R92C_MCUFWDL_EN, 0);
+
+	urtwm_setbits_4(sc, R92C_MCUFWDL, R92C_MCUFWDL_WINTINI_RDY,
+	    R92C_MCUFWDL_RDY);
+
+	urtwm_fw_reset(sc);
+
+	/* Wait for firmware readiness. */
+	for (ntries = 0; ntries < 20; ntries++) {
+		if (urtwm_read_4(sc, R92C_MCUFWDL) & R92C_MCUFWDL_WINTINI_RDY)
 			break;
-		urtwn_ms_delay(sc);
+		urtwm_delay(sc, 10000);
 	}
-	if (ntries == 1000) {
+	if (ntries == 20) {
 		device_printf(sc->sc_dev,
 		    "timeout waiting for firmware readiness\n");
 		error = ETIMEDOUT;
@@ -3829,7 +3808,6 @@ fail:
 	return (error);
 }
 #endif
-#endif	/* URTWM_TODO */
 
 static int
 urtwm_dma_init(struct urtwm_softc *sc)
@@ -5109,7 +5087,15 @@ urtwm_init(struct urtwm_softc *sc)
 	if (error != 0)
 		goto fail;
 
-	/* TODO: Firmware loading is done here. */
+#ifndef URTWM_WITHOUT_UCODE
+	/* Load 8051 microcode. */
+	error = urtwm_load_firmware(sc);
+	if (error == 0)
+		sc->sc_flags |= URTWM_FW_LOADED;
+
+	/* Init firmware commands ring. */
+	sc->fwcur = 0;
+#endif
 
 	/* Initialize MAC block. */
 	error = urtwm_mac_init(sc);
@@ -5343,7 +5329,7 @@ urtwm_stop(struct urtwm_softc *sc)
 		return;
 	}
 
-	sc->sc_flags &= ~URTWM_RUNNING;
+	sc->sc_flags &= ~(URTWM_RUNNING | URTWM_FW_LOADED);
 #ifdef URTWM_TODO
 	sc->thcal_lctemp = 0;
 #endif
@@ -5449,5 +5435,8 @@ static devclass_t urtwm_devclass;
 DRIVER_MODULE(urtwm, uhub, urtwm_driver, urtwm_devclass, NULL, NULL);
 MODULE_DEPEND(urtwm, usb, 1, 1, 1);
 MODULE_DEPEND(urtwm, wlan, 1, 1, 1);
+#ifndef URTWM_WITHOUT_UCODE
+MODULE_DEPEND(urtwm, firmware, 1, 1, 1);
+#endif
 MODULE_VERSION(urtwm, 1);
 USB_PNP_HOST_INFO(urtwm_devs);
