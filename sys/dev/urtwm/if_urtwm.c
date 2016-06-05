@@ -116,7 +116,12 @@ TUNABLE_INT("hw.usb.urtwm.enable_11n", &urtwm_enable_11n);
 /* various supported device vendors/products */
 static const STRUCT_USB_HOST_ID urtwm_devs[] = {
 #define URTWM_DEV(v,p)  { USB_VP(USB_VENDOR_##v, USB_PRODUCT_##v##_##p) }
-	URTWM_DEV(DLINK,	DWA171A1)
+	URTWM_DEV(DLINK,	DWA171A1),
+	URTWM_DEV(DLINK,	DWA172A1),
+	URTWM_DEV(EDIMAX,	EW7811UTC_1),
+	URTWM_DEV(EDIMAX,	EW7811UTC_2),
+	URTWM_DEV(HAWKING,	HD65U),
+	URTWM_DEV(NETGEAR,	A6100)
 #undef URTWM_DEV
 };
 

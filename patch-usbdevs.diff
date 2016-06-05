@@ -1,12 +1,38 @@
 Index: sys/dev/usb/usbdevs
 ===================================================================
---- sys/dev/usb/usbdevs	(revision 300951)
+--- sys/dev/usb/usbdevs	(revision 301413)
 +++ sys/dev/usb/usbdevs	(working copy)
-@@ -1620,6 +1620,7 @@
+@@ -1620,6 +1620,8 @@
  product DLINK DWL120E		0x3200	DWL-120 rev E
  product DLINK DWA125D1		0x330f	DWA-125 rev D1
  product DLINK DWA123D1		0x3310	DWA-123 rev D1
 +product DLINK DWA171A1		0x3314	DWA-171 rev A1
++product DLINK DWA172A1		0x3318	DWA-172 rev A1
  product DLINK DWL122		0x3700	DWL-122
  product DLINK DWLG120		0x3701	DWL-G120
  product DLINK DWL120F		0x3702	DWL-120 rev F
+@@ -1738,6 +1740,8 @@
+ product EDIMAX EW7733UND	0x7733	EW-7733UnD
+ product EDIMAX EW7811UN		0x7811	EW-7811Un
+ product	EDIMAX RTL8192CU	0x7822	RTL8192CU
++product EDIMAX EW7811UTC_1	0xa811	EW-7811UTC
++product EDIMAX EW7811UTC_2	0xa812	EW-7811UTC
+ 
+ /* eGalax Products */
+ product EGALAX TPANEL		0x0001	Touch Panel
+@@ -2260,6 +2264,7 @@
+ product HAWKING UF100		0x400c	10/100 USB Ethernet
+ product HAWKING RTL8192SU_1	0x0015	RTL8192SU
+ product HAWKING RTL8192SU_2	0x0016	RTL8192SU
++product HAWKING HD65U		0x0023	HD65U
+ 
+ /* HID Global GmbH products */
+ product HIDGLOBAL CM2020	0x0596	Omnikey Cardman 2020
+@@ -3276,6 +3281,7 @@
+ product NETGEAR RTL8192CU	0x9021	RTL8192CU
+ product NETGEAR WNA1000		0x9040	WNA1000
+ product NETGEAR WNA1000M	0x9041	WNA1000M
++product NETGEAR A6100		0x9052	A6100
+ product NETGEAR2 MA101		0x4100	MA101
+ product NETGEAR2 MA101B		0x4102	MA101 Rev B
+ product NETGEAR3 WG111T		0x4250	WG111T
