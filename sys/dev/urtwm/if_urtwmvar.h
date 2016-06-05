@@ -209,6 +209,7 @@ struct urtwm_softc {
 	void		(*sc_parse_rom)(struct urtwm_softc *,
 			    struct r88a_rom *);
 	int		(*sc_power_on)(struct urtwm_softc *);
+	void		(*sc_power_off)(struct urtwm_softc *);
 };
 
 #define	URTWM_LOCK(sc)			mtx_lock(&(sc)->sc_mtx)

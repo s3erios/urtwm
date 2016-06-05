@@ -299,7 +299,8 @@ static void		urtwm_start(struct urtwm_softc *);
 static void		urtwm_parent(struct ieee80211com *);
 static int		urtwm_r12a_power_on(struct urtwm_softc *);
 static int		urtwm_r21a_power_on(struct urtwm_softc *);
-static void		urtwm_power_off(struct urtwm_softc *);
+static void		urtwm_r12a_power_off(struct urtwm_softc *);
+static void		urtwm_r21a_power_off(struct urtwm_softc *);
 static int		urtwm_llt_init(struct urtwm_softc *);
 #ifndef URTWM_WITHOUT_UCODE
 static void		urtwm_fw_reset(struct urtwm_softc *);
@@ -375,6 +376,8 @@ static void		urtwm_delay(struct urtwm_softc *, int);
 	(((_sc)->sc_parse_rom)((_sc), (_rom)))
 #define urtwm_power_on(_sc) \
 	(((_sc)->sc_power_on)((_sc)))
+#define urtwm_power_off(_sc) \
+	(((_sc)->sc_power_off)((_sc)))
 
 static struct usb_config urtwm_config[URTWM_N_TRANSFER] = {
 	[URTWM_BULK_RX] = {
@@ -1943,12 +1946,14 @@ urtwm_config_specific(struct urtwm_softc *sc)
 	if (URTWM_CHIP_IS_12A(sc)) {
 		sc->sc_parse_rom = urtwm_r12a_parse_rom;
 		sc->sc_power_on = urtwm_r12a_power_on;
+		sc->sc_power_off = urtwm_r12a_power_off;
 
 		sc->ntxchains = 2;
 		sc->nrxchains = 2;
 	} else {
 		sc->sc_parse_rom = urtwm_r21a_parse_rom;
 		sc->sc_power_on = urtwm_r21a_power_on;
+		sc->sc_power_off = urtwm_r21a_power_off;
 
 		sc->ntxchains = 1;
 		sc->nrxchains = 1;
@@ -3610,7 +3615,147 @@ urtwm_r21a_power_on(struct urtwm_softc *sc)
 }
 
 static void
-urtwm_power_off(struct urtwm_softc *sc)
+urtwm_r12a_power_off(struct urtwm_softc *sc)
+{
+	int ntries;
+
+	/* Stop Rx. */
+	urtwm_write_1(sc, R92C_CR, 0);
+
+	/* Move card to Low Power state. */
+	/* Block all Tx queues. */
+	urtwm_write_1(sc, R92C_TXPAUSE, R92C_TX_QUEUE_ALL);
+
+	for (ntries = 0; ntries < 5000; ntries++) {
+		/* Should be zero if no packet is transmitting. */
+		if (urtwm_read_4(sc, R88E_SCH_TXCMD) == 0)
+			break;
+
+		urtwm_delay(sc, 10);
+	}
+	if (ntries == 5000) {
+		device_printf(sc->sc_dev, "%s: failed to block Tx queues\n",
+		    __func__);
+		return;
+	}
+
+	/* Turn off 3-wire. */
+	urtwm_write_1(sc, R88A_HSSI_PARAM1(0), 0x04);
+	urtwm_write_1(sc, R88A_HSSI_PARAM1(1), 0x04);
+
+	/* CCK and OFDM are disabled, and clock are gated. */
+	urtwm_setbits_1(sc, R92C_SYS_FUNC_EN, R92C_SYS_FUNC_EN_BBRSTB, 0);
+
+	urtwm_delay(sc, 1);
+
+	/* Reset whole BB. */
+	urtwm_setbits_1(sc, R92C_SYS_FUNC_EN, R92C_SYS_FUNC_EN_BB_GLB_RST, 0);
+
+	/* Reset MAC TRX. */
+	urtwm_write_1(sc, R92C_CR,
+	    R92C_CR_HCI_TXDMA_EN | R92C_CR_HCI_RXDMA_EN);
+
+	/* check if removed later. (?) */
+	urtwm_setbits_1_shift(sc, R92C_CR, R92C_CR_ENSEC, 0, 1);
+
+	/* Respond TxOK to scheduler */
+	urtwm_setbits_1(sc, R92C_DUAL_TSF_RST, 0, R92C_DUAL_TSF_RST_TXOK);
+
+	/* If firmware in ram code, do reset. */
+#ifndef URTWM_WITHOUT_UCODE
+	if (urtwm_read_1(sc, R92C_MCUFWDL) & R92C_MCUFWDL_RAM_DL_SEL)
+		urtwm_fw_reset(sc);
+#endif
+
+	/* Reset MCU. */
+	urtwm_setbits_1_shift(sc, R92C_SYS_FUNC_EN, R92C_SYS_FUNC_EN_CPUEN,
+	    0, 1);
+	urtwm_write_1(sc, R92C_MCUFWDL, 0);
+
+	/* Move card to Disabled state. */
+	/* Turn off 3-wire. */
+	urtwm_write_1(sc, R88A_HSSI_PARAM1(0), 0x04);
+	urtwm_write_1(sc, R88A_HSSI_PARAM1(1), 0x04);
+
+	/* Reset BB, close RF. */
+	urtwm_setbits_1(sc, R92C_SYS_FUNC_EN, R92C_SYS_FUNC_EN_BB_GLB_RST, 0);
+
+	urtwm_delay(sc, 1);
+
+	/* SPS PWM mode. */
+	urtwm_setbits_1_shift(sc, R92C_APS_FSMCO, 0xff,
+	    R92C_APS_FSMCO_SOP_RCK | R92C_APS_FSMCO_SOP_ABG, 3);
+
+	/* ANA clock = 500k. */
+	urtwm_setbits_1(sc, R92C_SYS_CLKR, R92C_SYS_CLKR_ANA8M, 0);
+
+	/* Turn off MAC by HW state machine */
+	urtwm_setbits_1_shift(sc, R92C_APS_FSMCO, 0, R92C_APS_FSMCO_APFM_OFF,
+	    1);
+	for (ntries = 0; ntries < 5000; ntries++) {
+		/* Wait until it will be disabled. */
+		if ((urtwm_read_2(sc, R92C_APS_FSMCO) &
+		    R92C_APS_FSMCO_APFM_OFF) == 0)
+			break;
+
+		urtwm_delay(sc, 10);
+	}
+	if (ntries == 5000) {
+		device_printf(sc->sc_dev, "%s: could not turn off MAC\n",
+		    __func__);
+		return;
+	}
+
+	/* Reset 8051. */
+	urtwm_setbits_1_shift(sc, R92C_SYS_FUNC_EN, R92C_SYS_FUNC_EN_CPUEN,
+	    0, 1);
+
+	/* Fill the default value of host_CPU handshake field. */
+	urtwm_write_1(sc, R92C_MCUFWDL,
+	    R92C_MCUFWDL_EN | R92C_MCUFWDL_CHKSUM_RPT);
+
+	urtwm_setbits_1(sc, R92C_GPIO_IO_SEL, 0xf0, 0xc0);
+
+	/* GPIO 11 input mode, 10...8 output mode. */
+	urtwm_write_1(sc, R92C_MAC_PINMUX_CFG, 0x07);
+
+	/* GPIO 7...0, output = input */
+	urtwm_write_1(sc, R92C_GPIO_OUT, 0);
+
+	/* GPIO 7...0 output mode. */
+	urtwm_write_1(sc, R92C_GPIO_IOSEL, 0xff);
+
+	urtwm_write_1(sc, R92C_GPIO_MOD, 0);
+
+	/* Turn on ZCD. */
+	urtwm_setbits_2(sc, 0x014, 0, 0x0180);
+
+	/* Force PFM mode. */
+	urtwm_setbits_1(sc, R92C_SPS0_CTRL + 1, 0x01, 0);
+
+	/* LDO sleep mode. */
+	urtwm_setbits_1(sc, R92C_LPLDO_CTRL, 0, R92C_LPLDO_CTRL_SLEEP);
+
+	/* ANA clock = 500k. */
+	urtwm_setbits_1(sc, R92C_SYS_CLKR, R92C_SYS_CLKR_ANA8M, 0);
+
+	/* SOP option to disable BG/MB. */
+	urtwm_setbits_1_shift(sc, R92C_APS_FSMCO, 0xff,
+	    R92C_APS_FSMCO_SOP_RCK, 3);
+
+	/* Disable RFC_0. */
+	urtwm_setbits_1(sc, R92C_RF_CTRL, R92C_RF_CTRL_RSTB, 0);
+
+	/* Disable RFC_1. */
+	urtwm_setbits_1(sc, R88A_RF_B_CTRL, 0x02, 0);
+
+	/* Enable WL suspend. */
+	urtwm_setbits_1_shift(sc, R92C_APS_FSMCO, 0, R92C_APS_FSMCO_AFSM_HSUS,
+	    1);
+}
+
+static void
+urtwm_r21a_power_off(struct urtwm_softc *sc)
 {
 	int ntries;
 
@@ -3647,14 +3792,14 @@ urtwm_power_off(struct urtwm_softc *sc)
 	    R92C_CR_HCI_TXDMA_EN | R92C_CR_HCI_RXDMA_EN);
 
 	/* check if removed later. (?) */
-	urtwm_setbits_1_shift(sc, R92C_CR, R92C_CR_ENSWBCN, 0, 1);
+	urtwm_setbits_1_shift(sc, R92C_CR, R92C_CR_ENSEC, 0, 1);
 
 	/* Respond TxOK to scheduler */
 	urtwm_setbits_1(sc, R92C_DUAL_TSF_RST, 0, R92C_DUAL_TSF_RST_TXOK);
 
 	/* If firmware in ram code, do reset. */
 #ifndef URTWM_WITHOUT_UCODE
-	if (urtwm_read_1(sc, R92C_MCUFWDL) & R92C_MCUFWDL_RDY)  
+	if (urtwm_read_1(sc, R92C_MCUFWDL) & R92C_MCUFWDL_RAM_DL_SEL)
 		urtwm_fw_reset(sc);
 #endif
 
