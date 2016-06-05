@@ -116,12 +116,30 @@ TUNABLE_INT("hw.usb.urtwm.enable_11n", &urtwm_enable_11n);
 /* various supported device vendors/products */
 static const STRUCT_USB_HOST_ID urtwm_devs[] = {
 #define URTWM_DEV(v,p)  { USB_VP(USB_VENDOR_##v, USB_PRODUCT_##v##_##p) }
+#define URTWM_RTL8812A_DEV(v,p) \
+	{ USB_VPI(USB_VENDOR_##v, USB_PRODUCT_##v##_##p, URTWM_RTL8812A) }
+#define URTWM_RTL8812A	1
+	URTWM_RTL8812A_DEV(ASUS,		USBAC56),
+	URTWM_RTL8812A_DEV(CISCOLINKSYS,	WUSB6300),
+	URTWM_RTL8812A_DEV(DLINK,		DWA182C1),
+	URTWM_RTL8812A_DEV(DLINK,		DWA180A1),
+	URTWM_RTL8812A_DEV(EDIMAX,		EW7822UAC),
+	URTWM_RTL8812A_DEV(IODATA,		WNAC867U),
+	URTWM_RTL8812A_DEV(MELCO,		WIU3866D),
+	URTWM_RTL8812A_DEV(NEC,			WL900U),
+	URTWM_RTL8812A_DEV(PLANEX2,		GW900D),
+	URTWM_RTL8812A_DEV(SENAO,		EUB1200AC),
+	URTWM_RTL8812A_DEV(SITECOMEU,		WLA7100),
+	URTWM_RTL8812A_DEV(TRENDNET,		TEW805UB),
+	URTWM_RTL8812A_DEV(ZYXEL,		NWD6605),
 	URTWM_DEV(DLINK,	DWA171A1),
 	URTWM_DEV(DLINK,	DWA172A1),
 	URTWM_DEV(EDIMAX,	EW7811UTC_1),
 	URTWM_DEV(EDIMAX,	EW7811UTC_2),
 	URTWM_DEV(HAWKING,	HD65U),
+	URTWM_DEV(MELCO,	WIU2433DM),
 	URTWM_DEV(NETGEAR,	A6100)
+#undef URTWM_RTL8812A_DEV
 #undef URTWM_DEV
 };
 
@@ -208,7 +226,12 @@ static int		urtwm_efuse_read(struct urtwm_softc *, uint8_t *,
 static int		urtwm_efuse_switch_power(struct urtwm_softc *);
 static int		urtwm_setup_endpoints(struct urtwm_softc *);
 static int		urtwm_read_chipid(struct urtwm_softc *);
+static void		urtwm_config_specific(struct urtwm_softc *);
 static int		urtwm_read_rom(struct urtwm_softc *);
+static void		urtwm_r12a_parse_rom(struct urtwm_softc *,
+			    struct r88a_rom *);
+static void		urtwm_r21a_parse_rom(struct urtwm_softc *,
+			    struct r88a_rom *);
 static void		urtwm_parse_rom(struct urtwm_softc *,
 			    struct r88a_rom *);
 #ifdef URTWM_TODO
@@ -274,7 +297,8 @@ static void		urtwm_tx_checksum(struct r88a_tx_desc *);
 static int		urtwm_transmit(struct ieee80211com *, struct mbuf *);
 static void		urtwm_start(struct urtwm_softc *);
 static void		urtwm_parent(struct ieee80211com *);
-static int		urtwm_power_on(struct urtwm_softc *);
+static int		urtwm_r12a_power_on(struct urtwm_softc *);
+static int		urtwm_r21a_power_on(struct urtwm_softc *);
 static void		urtwm_power_off(struct urtwm_softc *);
 static int		urtwm_llt_init(struct urtwm_softc *);
 #ifndef URTWM_WITHOUT_UCODE
@@ -346,6 +370,11 @@ static void		urtwm_delay(struct urtwm_softc *, int);
 #define	urtwm_bb_write		urtwm_write_4
 #define urtwm_bb_read		urtwm_read_4
 #define urtwm_bb_setbits	urtwm_setbits_4
+
+#define urtwm_parse_rom_specific(_sc, _rom) \
+	(((_sc)->sc_parse_rom)((_sc), (_rom)))
+#define urtwm_power_on(_sc) \
+	(((_sc)->sc_power_on)((_sc)))
 
 static struct usb_config urtwm_config[URTWM_N_TRANSFER] = {
 	[URTWM_BULK_RX] = {
@@ -459,6 +488,11 @@ urtwm_attach(device_t self)
 	device_set_usb_desc(self);
 	sc->sc_udev = uaa->device;
 	sc->sc_dev = self;
+	if (USB_GET_DRIVER_INFO(uaa) == URTWM_RTL8812A) {
+		sc->chip |= URTWM_CHIP_12A;
+		device_printf(sc->sc_dev, "RTL8812AU is not supported yet!\n");
+		goto detach;
+	}
 
 #ifdef USB_DEBUG
 	int debug;
@@ -485,8 +519,8 @@ urtwm_attach(device_t self)
 		goto detach;
 	}
 
-	sc->ntxchains = 1;
-	sc->nrxchains = 1;
+	/* Setup device-specific configuration. */
+	urtwm_config_specific(sc);
 
 	error = urtwm_read_rom(sc);
 	if (error != 0) {
@@ -495,7 +529,8 @@ urtwm_attach(device_t self)
 		goto detach;
 	}
 
-	device_printf(sc->sc_dev, "MAC/BB RTL8821AU, RF 6052 %dT%dR\n",
+	device_printf(sc->sc_dev, "MAC/BB RTL%sAU, RF 6052 %dT%dR\n",
+	    URTWM_CHIP_IS_12A(sc) ? "8812" : "8821",
 	    sc->ntxchains, sc->nrxchains);
 
 	ic->ic_softc = sc;
@@ -1543,7 +1578,7 @@ urtwm_cmdq_cb(void *arg, int pending)
 	struct urtwm_cmdq *item;
 
 	/*
-	 * Device must be powered on (via urtwn_power_on())
+	 * Device must be powered on (via urtwm_power_on())
 	 * before any command may be sent.
 	 */
 	URTWM_LOCK(sc);
@@ -1898,9 +1933,26 @@ urtwm_read_chipid(struct urtwm_softc *sc)
 	if (reg & R92C_SYS_CFG_TRP_VAUX_EN)	/* test chip */
 		return (EIO);
 
-	/* XXX TODO: RTL8812AU. */
-
 	return (0);
+}
+
+static void
+urtwm_config_specific(struct urtwm_softc *sc)
+{
+
+	if (URTWM_CHIP_IS_12A(sc)) {
+		sc->sc_parse_rom = urtwm_r12a_parse_rom;
+		sc->sc_power_on = urtwm_r12a_power_on;
+
+		sc->ntxchains = 2;
+		sc->nrxchains = 2;
+	} else {
+		sc->sc_parse_rom = urtwm_r21a_parse_rom;
+		sc->sc_power_on = urtwm_r21a_power_on;
+
+		sc->ntxchains = 1;
+		sc->nrxchains = 1;
+	}
 }
 
 static int
@@ -1928,10 +1980,22 @@ fail:
 }
 
 static void
+urtwm_r12a_parse_rom(struct urtwm_softc *sc, struct r88a_rom *rom)
+{
+	IEEE80211_ADDR_COPY(sc->sc_ic.ic_macaddr, rom->macaddr_12a);
+}
+
+static void
+urtwm_r21a_parse_rom(struct urtwm_softc *sc, struct r88a_rom *rom)
+{
+	IEEE80211_ADDR_COPY(sc->sc_ic.ic_macaddr, rom->macaddr_21a);
+}
+
+static void
 urtwm_parse_rom(struct urtwm_softc *sc, struct r88a_rom *rom)
 {
 #define URTWM_GET_ROM_VAR(var, def)	(((var) != 0xff) ? (var) : (def))
-#define URTWM_SIGN4TO8(val) 		(((val) & 0x08) ? (val) | 0xf0 : (val))
+#define URTWM_SIGN4TO8(val)		(((val) & 0x08) ? (val) | 0xf0 : (val))
 	int i, j;
 
 	sc->tx_bbswing_2g = URTWM_GET_ROM_VAR(rom->tx_bbswing_2g, 0);
@@ -1939,7 +2003,8 @@ urtwm_parse_rom(struct urtwm_softc *sc, struct r88a_rom *rom)
 
 	/* Read PA/LNA types. */
 	sc->pa_type = URTWM_GET_ROM_VAR(rom->pa_type, 0);
-	sc->lna_type = URTWM_GET_ROM_VAR(rom->lna_type, 0);
+	sc->lna_type_2g = URTWM_GET_ROM_VAR(rom->lna_type_2g, 0);
+	sc->lna_type_5g = URTWM_GET_ROM_VAR(rom->lna_type_5g, 0);
 
 	for (i = 0; i < sc->ntxchains; i++) {
 		struct r88a_tx_pwr_2g *pwr_2g = &rom->tx_pwr[i].pwr_2g;
@@ -2014,7 +2079,9 @@ urtwm_parse_rom(struct urtwm_softc *sc, struct r88a_rom *rom)
 	sc->regulatory = MS(rom->rf_board_opt, R92C_ROM_RF1_REGULATORY);
 	URTWM_DPRINTF(sc, URTWM_DEBUG_ROM, "%s: regulatory type=%d\n",
 	    __func__, sc->regulatory);
-	IEEE80211_ADDR_COPY(sc->sc_ic.ic_macaddr, rom->macaddr);
+
+	/* Read MAC address. */
+	urtwm_parse_rom_specific(sc, rom);
 #undef URTWM_SIGN4TO8
 #undef URTWM_GET_ROM_VAR
 }
@@ -3351,12 +3418,87 @@ urtwm_parent(struct ieee80211com *ic)
 }
 
 static int
-urtwm_power_on(struct urtwm_softc *sc)
+urtwm_r12a_power_on(struct urtwm_softc *sc)
 {
 #define URTWM_CHK(res) do {			\
 	if (res != USB_ERR_NORMAL_COMPLETION)	\
 		return (EIO);			\
 } while(0)
+	int ntries;
+
+	/* Force PWM mode. */
+	URTWM_CHK(urtwm_setbits_1(sc, R92C_SPS0_CTRL + 1, 0, 0x01));
+
+	/* Turn off ZCD. */
+	URTWM_CHK(urtwm_setbits_2(sc, 0x014, 0x0180, 0));
+
+	/* Enable LDO normal mode. */
+	URTWM_CHK(urtwm_setbits_1(sc, R92C_LPLDO_CTRL, R92C_LPLDO_CTRL_SLEEP,
+	    0));
+
+	/* GPIO 0...7 input mode. */
+	URTWM_CHK(urtwm_write_1(sc, R92C_GPIO_IOSEL, 0));
+
+	/* GPIO 11...8 input mode. */
+	URTWM_CHK(urtwm_write_1(sc, R92C_MAC_PINMUX_CFG, 0));
+
+	/* Enable WL suspend. */
+	URTWM_CHK(urtwm_setbits_1_shift(sc, R92C_APS_FSMCO,
+	    R92C_APS_FSMCO_AFSM_HSUS, 0, 1));
+
+	/* Enable 8051. */
+	URTWM_CHK(urtwm_setbits_1_shift(sc, R92C_SYS_FUNC_EN,
+	    0, R92C_SYS_FUNC_EN_CPUEN, 1));
+
+	/* Disable SW LPS. */
+	URTWM_CHK(urtwm_setbits_1_shift(sc, R92C_APS_FSMCO,
+	    R92C_APS_FSMCO_APFM_RSM, 0, 1));
+
+	/* Wait for power ready bit. */
+	for (ntries = 0; ntries < 5000; ntries++) {
+		if (urtwm_read_4(sc, R92C_APS_FSMCO) & R92C_APS_FSMCO_SUS_HOST)
+			break;
+		urtwm_delay(sc, 10);
+	}
+	if (ntries == 5000) {
+		device_printf(sc->sc_dev,
+		    "timeout waiting for chip power up\n");
+		return (ETIMEDOUT);
+	}
+
+	/* Disable HWPDN. */
+	URTWM_CHK(urtwm_setbits_1_shift(sc, R92C_APS_FSMCO,
+	    R92C_APS_FSMCO_APDM_HPDN, 0, 1));
+
+	/* Disable WL suspend. */
+	URTWM_CHK(urtwm_setbits_1_shift(sc, R92C_APS_FSMCO,
+	    R92C_APS_FSMCO_AFSM_HSUS, 0, 1));
+
+	URTWM_CHK(urtwm_setbits_1_shift(sc, R92C_APS_FSMCO, 0,
+	    R92C_APS_FSMCO_APFM_ONMAC, 1));
+	for (ntries = 0; ntries < 5000; ntries++) {
+		if (!(urtwm_read_2(sc, R92C_APS_FSMCO) &
+		    R92C_APS_FSMCO_APFM_ONMAC))
+			break;
+		urtwm_delay(sc, 10);
+	}
+	if (ntries == 5000)
+		return (ETIMEDOUT);
+
+	/* Enable MAC DMA/WMAC/SCHEDULE/SEC blocks. */
+	URTWM_CHK(urtwm_write_2(sc, R92C_CR, 0x0000));
+	URTWM_CHK(urtwm_setbits_2(sc, R92C_CR, 0,
+	    R92C_CR_HCI_TXDMA_EN | R92C_CR_TXDMA_EN |
+	    R92C_CR_HCI_RXDMA_EN | R92C_CR_RXDMA_EN |
+	    R92C_CR_PROTOCOL_EN | R92C_CR_SCHEDULE_EN |
+	    R92C_CR_ENSEC | R92C_CR_CALTMR_EN));
+
+	return (0);
+}
+
+static int
+urtwm_r21a_power_on(struct urtwm_softc *sc)
+{
 	int ntries;
 
 	/* Clear suspend and power down bits.*/
@@ -3898,8 +4040,8 @@ urtwm_bb_init(struct urtwm_softc *sc)
 	    R92C_RF_CTRL_EN | R92C_RF_CTRL_RSTB | R92C_RF_CTRL_SDMRSTB);
 
 	/* Select BB programming based on board type. */
-	if ((sc->pa_type & R88A_ROM_PA_TYPE_EXTERNAL_5GHZ) &&
-	    (sc->lna_type & R88A_ROM_LNA_TYPE_EXTERNAL_5GHZ))
+	if ((sc->pa_type & R8821A_ROM_PA_TYPE_EXTERNAL_5GHZ) &&
+	    (sc->lna_type_5g & R8821A_ROM_LNA_TYPE_EXTERNAL_5GHZ))
 		prog = &rtl8821au_ext_5ghz_bb_prog;
 	else
 		prog = &rtl8821au_bb_prog;
@@ -3931,11 +4073,11 @@ urtwm_rf_init(struct urtwm_softc *sc)
 	int i, j;
 
 	/* Select RF programming based on board type. */
-	if (!(sc->pa_type & R88A_ROM_PA_TYPE_EXTERNAL_5GHZ) &&
-	    !(sc->lna_type & R88A_ROM_LNA_TYPE_EXTERNAL_5GHZ))
+	if (!(sc->pa_type & R8821A_ROM_PA_TYPE_EXTERNAL_5GHZ) &&
+	    !(sc->lna_type_5g & R8821A_ROM_LNA_TYPE_EXTERNAL_5GHZ))
 		prog = rtl8821au_rf_prog;
-	else if ((sc->pa_type & R88A_ROM_PA_TYPE_EXTERNAL_5GHZ) &&
-		 (sc->lna_type & R88A_ROM_LNA_TYPE_EXTERNAL_5GHZ))
+	else if ((sc->pa_type & R8821A_ROM_PA_TYPE_EXTERNAL_5GHZ) &&
+		 (sc->lna_type_5g & R8821A_ROM_LNA_TYPE_EXTERNAL_5GHZ))
 		prog = rtl8821au_ext_5ghz_rf_prog;
 	else
 		prog = rtl8821au_1_rf_prog;
@@ -4019,7 +4161,7 @@ urtwm_band_change(struct urtwm_softc *sc, struct ieee80211_channel *c,
 		urtwm_bb_setbits(sc, R88A_RFE_PINMUX(0),
 		    R88A_RFE_PINMUX_PA_A_MASK, 0x7);
 
-		if (sc->lna_type & R88A_ROM_LNA_TYPE_EXTERNAL_2GHZ) {
+		if (sc->lna_type_2g & R8821A_ROM_LNA_TYPE_EXTERNAL_2GHZ) {
 			/* Turn on 2.4 GHz external LNA. */
 			urtwm_bb_setbits(sc, R88A_RFE_INV(0), 0, 0x00100000);
 			urtwm_bb_setbits(sc, R88A_RFE_INV(0), 0x00400000, 0);
@@ -4050,7 +4192,7 @@ urtwm_band_change(struct urtwm_softc *sc, struct ieee80211_channel *c,
 		urtwm_bb_setbits(sc, R88A_RFE_PINMUX(0),
 		    R88A_RFE_PINMUX_PA_A_MASK, 0x4);
 
-		if (sc->lna_type & R88A_ROM_LNA_TYPE_EXTERNAL_2GHZ) {
+		if (sc->lna_type_2g & R8821A_ROM_LNA_TYPE_EXTERNAL_2GHZ) {
 			/* Bypass 2.4 GHz external LNA. */
 			urtwm_bb_setbits(sc, R88A_RFE_INV(0), 0x00100000, 0);
 			urtwm_bb_setbits(sc, R88A_RFE_INV(0), 0x00400000, 0);

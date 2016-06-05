@@ -994,7 +994,7 @@ struct r92c_fw_hdr {
  */
 struct r88e_fw_cmd {
 	uint8_t id;
-#define	R88E_CMD_MACID_CONFIG		0x40
+#define R88E_CMD_MACID_CONFIG		0x40
 #define R88A_CMD_IQ_CALIBRATE		0x45
 
 	uint8_t msg[7];
@@ -1080,7 +1080,7 @@ struct r88a_tx_pwr {
 } __packed;
 
 /*
- * RTL8821AU ROM image.
+ * RTL8812AU/RTL8821AU ROM image.
  */
 struct r88a_rom {
 	uint8_t			reserved1[16];
@@ -1090,12 +1090,14 @@ struct r88a_rom {
 	uint8_t			thermal_meter;
 	uint8_t			iqk_lck;
 	uint8_t			pa_type;
-#define R88A_ROM_PA_TYPE_EXTERNAL_5GHZ	0x01
+#define R8821A_ROM_PA_TYPE_EXTERNAL_5GHZ	0x01
 
-	uint8_t			reserved2[2];
-	uint8_t			lna_type;
-#define R88A_ROM_LNA_TYPE_EXTERNAL_2GHZ	0x08
-#define R88A_ROM_LNA_TYPE_EXTERNAL_5GHZ	0x08
+	uint8_t			lna_type_2g;
+#define R8821A_ROM_LNA_TYPE_EXTERNAL_2GHZ	0x08
+
+	uint8_t			reserved2;
+	uint8_t			lna_type_5g;
+#define R8821A_ROM_LNA_TYPE_EXTERNAL_5GHZ	0x08
 
 	uint8_t			reserved3;
 	uint8_t			rf_board_opt;
@@ -1110,18 +1112,24 @@ struct r88a_rom {
 	uint8_t			customer_id;
 	uint8_t			tx_bbswing_2g;
 	uint8_t			tx_bbswing_5g;
-	uint8_t			reserved4[1];
-        uint8_t			rf_ant_opt;
-	uint8_t			reserved5[54];
-	uint16_t		vid;
-	uint16_t		pid;
-	uint8_t			reserved6[3];
-	uint8_t			macaddr[IEEE80211_ADDR_LEN];
-	uint8_t			reserved7[2];
-	uint8_t			string[8];	/* "Realtek " */
+	uint8_t			tx_pwr_calib_rate;
+	uint8_t			rf_ant_opt;
+	uint8_t			reserved4[6];
+	uint16_t		vid_12a;
+	uint16_t		pid_12a;
+	uint8_t			reserved5[3];
+	uint8_t			macaddr_12a[IEEE80211_ADDR_LEN];
+	uint8_t			reserved6[35];
+	uint16_t		vid_21a;
+	uint16_t		pid_21a;
+	uint8_t			reserved7[3];
+	uint8_t			macaddr_21a[IEEE80211_ADDR_LEN];
 	uint8_t			reserved8[2];
+	/* XXX check on RTL8812AU. */
+	uint8_t			string[8];	/* "Realtek " */
+	uint8_t			reserved9[2];
 	uint8_t			string_ven[23];	/* XXX variable length? */
-	uint8_t			reserved9[208];
+	uint8_t			reserved10[208];
 } __packed;
 
 #define	URTWM_EFUSE_MAX_LEN		512

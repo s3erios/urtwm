@@ -136,8 +136,15 @@ struct urtwm_softc {
 #define URTWM_RUNNING	0x02
 #define URTWM_FW_LOADED	0x08
 
+	uint8_t			chip;
+#define URTWM_CHIP_12A		0x01
+
+#define URTWM_CHIP_IS_12A(_sc)	!!((_sc)->chip & URTWM_CHIP_12A)
+#define URTWM_CHIP_IS_21A(_sc)	!((_sc)->chip & URTWM_CHIP_12A)
+
 	uint8_t			pa_type;
-	uint8_t			lna_type;
+	uint8_t			lna_type_2g;
+	uint8_t			lna_type_5g;
 	uint8_t			regulatory;
 	uint8_t			tx_bbswing_2g;
 	uint8_t			tx_bbswing_5g;
@@ -197,6 +204,11 @@ struct urtwm_softc {
 	void		(*sc_node_free)(struct ieee80211_node *);
 	void		(*sc_scan_curchan)(struct ieee80211_scan_state *,
 			    unsigned long);
+
+	/* device-specific */
+	void		(*sc_parse_rom)(struct urtwm_softc *,
+			    struct r88a_rom *);
+	int		(*sc_power_on)(struct urtwm_softc *);
 };
 
 #define	URTWM_LOCK(sc)			mtx_lock(&(sc)->sc_mtx)
