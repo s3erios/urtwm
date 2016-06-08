@@ -3903,7 +3903,7 @@ urtwm_r12a_power_off(struct urtwm_softc *sc)
 	urtwm_setbits_1(sc, R92C_RF_CTRL, R92C_RF_CTRL_RSTB, 0);
 
 	/* Disable RFC_1. */
-	urtwm_setbits_1(sc, R88A_RF_B_CTRL, 0x02, 0);
+	urtwm_setbits_1(sc, R88A_RF_B_CTRL, R92C_RF_CTRL_RSTB, 0);
 
 	/* Enable WL suspend. */
 	urtwm_setbits_1_shift(sc, R92C_APS_FSMCO, 0, R92C_APS_FSMCO_AFSM_HSUS,
