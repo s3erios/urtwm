@@ -220,6 +220,7 @@ struct urtwm_softc {
 			    struct r88a_rom *);
 	int		(*sc_power_on)(struct urtwm_softc *);
 	void		(*sc_power_off)(struct urtwm_softc *);
+	void		(*sc_crystalcap_write)(struct urtwm_softc *);
 
 	const struct urtwm_mac_prog	*mac_prog;
 	int				mac_size;

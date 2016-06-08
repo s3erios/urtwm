@@ -317,6 +317,8 @@ static int		urtwm_load_firmware(struct urtwm_softc *);
 static int		urtwm_dma_init(struct urtwm_softc *);
 static int		urtwm_mac_init(struct urtwm_softc *);
 static void		urtwm_bb_init(struct urtwm_softc *);
+static void		urtwm_r12a_crystalcap_write(struct urtwm_softc *);
+static void		urtwm_r21a_crystalcap_write(struct urtwm_softc *);
 static void		urtwm_rf_init(struct urtwm_softc *);
 static int		urtwm_rf_init_chain(struct urtwm_softc *,
 			    const struct urtwm_rf_prog *, int);
@@ -387,6 +389,8 @@ static void		urtwm_delay(struct urtwm_softc *, int);
 	(((_sc)->sc_power_on)((_sc)))
 #define urtwm_power_off(_sc) \
 	(((_sc)->sc_power_off)((_sc)))
+#define urtwm_crystalcap_write(_sc) \
+	(((_sc)->sc_crystalcap_write)((_sc)))
 
 static struct usb_config urtwm_config[URTWM_N_TRANSFER] = {
 	[URTWM_BULK_RX] = {
@@ -2040,6 +2044,7 @@ urtwm_config_specific(struct urtwm_softc *sc)
 		sc->sc_parse_rom = urtwm_r12a_parse_rom;
 		sc->sc_power_on = urtwm_r12a_power_on;
 		sc->sc_power_off = urtwm_r12a_power_off;
+		sc->sc_crystalcap_write = urtwm_r12a_crystalcap_write;
 
 		sc->mac_prog = &rtl8812au_mac[0];
 		sc->mac_size = nitems(rtl8812au_mac);
@@ -2056,6 +2061,7 @@ urtwm_config_specific(struct urtwm_softc *sc)
 		sc->sc_parse_rom = urtwm_r21a_parse_rom;
 		sc->sc_power_on = urtwm_r21a_power_on;
 		sc->sc_power_off = urtwm_r21a_power_off;
+		sc->sc_crystalcap_write = urtwm_r21a_crystalcap_write;
 
 		sc->mac_prog = &rtl8821au_mac[0];
 		sc->mac_size = nitems(rtl8821au_mac);
@@ -4388,6 +4394,32 @@ urtwm_bb_init(struct urtwm_softc *sc)
 		urtwm_bb_write(sc, R88A_INITIAL_GAIN(i), 0x20);
 		urtwm_delay(sc, 1);
 	}
+
+	urtwm_crystalcap_write(sc);
+}
+
+static void
+urtwm_r12a_crystalcap_write(struct urtwm_softc *sc)
+{
+	uint32_t reg;
+	uint8_t val;
+
+	val = sc->crystalcap & 0x3f;
+	reg = urtwm_bb_read(sc, R92C_MAC_PHY_CTRL);
+	reg = RW(reg, R8812A_MAC_PHY_CRYSTALCAP, val | (val << 6));
+	urtwm_bb_write(sc, R92C_MAC_PHY_CTRL, reg);
+}
+
+static void
+urtwm_r21a_crystalcap_write(struct urtwm_softc *sc)
+{
+	uint32_t reg;
+	uint8_t val;
+
+	val = sc->crystalcap & 0x3f;
+	reg = urtwm_bb_read(sc, R92C_MAC_PHY_CTRL);
+	reg = RW(reg, R8821A_MAC_PHY_CRYSTALCAP, val | (val << 6));
+	urtwm_bb_write(sc, R92C_MAC_PHY_CTRL, reg);
 }
 
 static void
