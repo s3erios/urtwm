@@ -1987,29 +1987,73 @@ fail:
 static void
 urtwm_r12a_parse_rom(struct urtwm_softc *sc, struct r88a_rom *rom)
 {
+#define URTWM_GET_ROM_VAR(var, def)	(((var) != 0xff) ? (var) : (def))
+#define URTWM_SIGN4TO8(val)		(((val) & 0x08) ? (val) | 0xf0 : (val))
+	uint8_t pa_type, lna_type_2g, lna_type_5g;
+
+	/* Read PA/LNA types. */
+	pa_type = URTWM_GET_ROM_VAR(rom->pa_type, 0);
+	lna_type_2g = URTWM_GET_ROM_VAR(rom->lna_type_2g, 0);
+	lna_type_5g = URTWM_GET_ROM_VAR(rom->lna_type_5g, 0);
+
+	sc->ext_pa_2g = R8812A_ROM_IS_PA_EXT_2GHZ(pa_type);
+	sc->ext_pa_5g = R8812A_ROM_IS_PA_EXT_5GHZ(pa_type);
+	sc->ext_lna_2g = R8821A_ROM_IS_LNA_EXT(lna_type_2g);
+	sc->ext_lna_5g = R8821A_ROM_IS_LNA_EXT(lna_type_5g);
+
+	if (sc->ext_pa_2g) {
+		sc->type_pa_2g =
+		    R8812A_GET_ROM_PA_TYPE(lna_type_2g, 0) |
+		    (R8812A_GET_ROM_PA_TYPE(lna_type_2g, 1) << 2);
+	}
+	if (sc->ext_pa_5g) {
+		sc->type_pa_5g =
+		    R8812A_GET_ROM_PA_TYPE(lna_type_5g, 0) |
+		    (R8812A_GET_ROM_PA_TYPE(lna_type_5g, 1) << 2);
+	}
+	if (sc->ext_lna_2g) {
+		sc->type_lna_2g =
+		    R8812A_GET_ROM_LNA_TYPE(lna_type_2g, 0) |
+		    (R8812A_GET_ROM_LNA_TYPE(lna_type_2g, 1) << 2);
+	}
+	if (sc->ext_lna_5g) {
+		sc->type_lna_5g =
+		    R8812A_GET_ROM_LNA_TYPE(lna_type_5g, 0) |
+		    (R8812A_GET_ROM_LNA_TYPE(lna_type_5g, 1) << 2);
+	}
+
+	/* Read MAC address. */
 	IEEE80211_ADDR_COPY(sc->sc_ic.ic_macaddr, rom->macaddr_12a);
 }
 
 static void
 urtwm_r21a_parse_rom(struct urtwm_softc *sc, struct r88a_rom *rom)
 {
+	uint8_t pa_type, lna_type_2g, lna_type_5g;
+
+	/* Read PA/LNA types. */
+	pa_type = URTWM_GET_ROM_VAR(rom->pa_type, 0);
+	lna_type_2g = URTWM_GET_ROM_VAR(rom->lna_type_2g, 0);
+	lna_type_5g = URTWM_GET_ROM_VAR(rom->lna_type_5g, 0);
+
+	sc->ext_pa_2g = R8821A_ROM_IS_PA_EXT_2GHZ(pa_type);
+	sc->ext_pa_5g = R8821A_ROM_IS_PA_EXT_5GHZ(pa_type);
+	sc->ext_lna_2g = R8821A_ROM_IS_LNA_EXT(lna_type_2g);
+	sc->ext_lna_5g = R8821A_ROM_IS_LNA_EXT(lna_type_5g);
+
+	/* Read MAC address. */
 	IEEE80211_ADDR_COPY(sc->sc_ic.ic_macaddr, rom->macaddr_21a);
 }
 
 static void
 urtwm_parse_rom(struct urtwm_softc *sc, struct r88a_rom *rom)
 {
-#define URTWM_GET_ROM_VAR(var, def)	(((var) != 0xff) ? (var) : (def))
-#define URTWM_SIGN4TO8(val)		(((val) & 0x08) ? (val) | 0xf0 : (val))
 	int i, j;
 
+	sc->crystalcap = URTWM_GET_ROM_VAR(rom->crystalcap,
+	    R88A_ROM_CRYSTALCAP_DEF);
 	sc->tx_bbswing_2g = URTWM_GET_ROM_VAR(rom->tx_bbswing_2g, 0);
 	sc->tx_bbswing_5g = URTWM_GET_ROM_VAR(rom->tx_bbswing_5g, 0);
-
-	/* Read PA/LNA types. */
-	sc->pa_type = URTWM_GET_ROM_VAR(rom->pa_type, 0);
-	sc->lna_type_2g = URTWM_GET_ROM_VAR(rom->lna_type_2g, 0);
-	sc->lna_type_5g = URTWM_GET_ROM_VAR(rom->lna_type_5g, 0);
 
 	for (i = 0; i < sc->ntxchains; i++) {
 		struct r88a_tx_pwr_2g *pwr_2g = &rom->tx_pwr[i].pwr_2g;
@@ -2082,10 +2126,12 @@ urtwm_parse_rom(struct urtwm_softc *sc, struct r88a_rom *rom)
 	}
 
 	sc->regulatory = MS(rom->rf_board_opt, R92C_ROM_RF1_REGULATORY);
+	sc->board_type = MS(URTWM_GET_ROM_VAR(rom->rf_board_opt, 0),
+	    R92C_ROM_RF1_BOARD_TYPE);
 	URTWM_DPRINTF(sc, URTWM_DEBUG_ROM, "%s: regulatory type=%d\n",
 	    __func__, sc->regulatory);
 
-	/* Read MAC address. */
+	/* Read device-specific parameters. */
 	urtwm_parse_rom_specific(sc, rom);
 #undef URTWM_SIGN4TO8
 #undef URTWM_GET_ROM_VAR
@@ -4185,8 +4231,7 @@ urtwm_bb_init(struct urtwm_softc *sc)
 	    R92C_RF_CTRL_EN | R92C_RF_CTRL_RSTB | R92C_RF_CTRL_SDMRSTB);
 
 	/* Select BB programming based on board type. */
-	if ((sc->pa_type & R8821A_ROM_PA_TYPE_EXTERNAL_5GHZ) &&
-	    (sc->lna_type_5g & R8821A_ROM_LNA_TYPE_EXTERNAL_5GHZ))
+	if (sc->ext_pa_5g && sc->ext_lna_5g)
 		prog = &rtl8821au_ext_5ghz_bb_prog;
 	else
 		prog = &rtl8821au_bb_prog;
@@ -4218,11 +4263,9 @@ urtwm_rf_init(struct urtwm_softc *sc)
 	int i, j;
 
 	/* Select RF programming based on board type. */
-	if (!(sc->pa_type & R8821A_ROM_PA_TYPE_EXTERNAL_5GHZ) &&
-	    !(sc->lna_type_5g & R8821A_ROM_LNA_TYPE_EXTERNAL_5GHZ))
+	if (!sc->ext_pa_5g && !sc->ext_lna_5g)
 		prog = rtl8821au_rf_prog;
-	else if ((sc->pa_type & R8821A_ROM_PA_TYPE_EXTERNAL_5GHZ) &&
-		 (sc->lna_type_5g & R8821A_ROM_LNA_TYPE_EXTERNAL_5GHZ))
+	else if (sc->ext_pa_5g && sc->ext_lna_5g)
 		prog = rtl8821au_ext_5ghz_rf_prog;
 	else
 		prog = rtl8821au_1_rf_prog;
@@ -4306,7 +4349,7 @@ urtwm_band_change(struct urtwm_softc *sc, struct ieee80211_channel *c,
 		urtwm_bb_setbits(sc, R88A_RFE_PINMUX(0),
 		    R88A_RFE_PINMUX_PA_A_MASK, 0x7);
 
-		if (sc->lna_type_2g & R8821A_ROM_LNA_TYPE_EXTERNAL_2GHZ) {
+		if (sc->ext_lna_2g) {
 			/* Turn on 2.4 GHz external LNA. */
 			urtwm_bb_setbits(sc, R88A_RFE_INV(0), 0, 0x00100000);
 			urtwm_bb_setbits(sc, R88A_RFE_INV(0), 0x00400000, 0);
@@ -4337,7 +4380,7 @@ urtwm_band_change(struct urtwm_softc *sc, struct ieee80211_channel *c,
 		urtwm_bb_setbits(sc, R88A_RFE_PINMUX(0),
 		    R88A_RFE_PINMUX_PA_A_MASK, 0x4);
 
-		if (sc->lna_type_2g & R8821A_ROM_LNA_TYPE_EXTERNAL_2GHZ) {
+		if (sc->ext_lna_2g) {
 			/* Bypass 2.4 GHz external LNA. */
 			urtwm_bb_setbits(sc, R88A_RFE_INV(0), 0x00100000, 0);
 			urtwm_bb_setbits(sc, R88A_RFE_INV(0), 0x00400000, 0);

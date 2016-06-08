@@ -142,10 +142,18 @@ struct urtwm_softc {
 #define URTWM_CHIP_IS_12A(_sc)	!!((_sc)->chip & URTWM_CHIP_12A)
 #define URTWM_CHIP_IS_21A(_sc)	!((_sc)->chip & URTWM_CHIP_12A)
 
-	uint8_t			pa_type;
-	uint8_t			lna_type_2g;
-	uint8_t			lna_type_5g;
+	int			ext_pa_2g:1,
+				ext_pa_5g:1,
+				ext_lna_2g:1,
+				ext_lna_5g:1,
+				type_pa_2g:4,
+				type_pa_5g:4,
+				type_lna_2g:4,
+				type_lna_5g:4;
+
+	uint8_t			board_type;
 	uint8_t			regulatory;
+	uint8_t			crystalcap;
 	uint8_t			tx_bbswing_2g;
 	uint8_t			tx_bbswing_5g;
 

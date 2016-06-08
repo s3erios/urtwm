@@ -1086,25 +1086,41 @@ struct r88a_rom {
 	uint8_t			reserved1[16];
 	struct r88a_tx_pwr	tx_pwr[URTWM_MAX_RF_PATH];
 	uint8_t			channel_plan;
-	uint8_t			xtal;
+	uint8_t			crystalcap;
+#define R88A_ROM_CRYSTALCAP_DEF		0x20
+
 	uint8_t			thermal_meter;
 	uint8_t			iqk_lck;
 	uint8_t			pa_type;
-#define R8821A_ROM_PA_TYPE_EXTERNAL_5GHZ	0x01
+#define R8812A_ROM_IS_PA_EXT_2GHZ(pa_type)	(((pa_type) & 0x30) == 0x30)
+#define R8812A_ROM_IS_PA_EXT_5GHZ(pa_type)	(((pa_type) & 0x03) == 0x03)
+#define R8821A_ROM_IS_PA_EXT_2GHZ(pa_type)	(((pa_type) & 0x10) == 0x10)
+#define R8821A_ROM_IS_PA_EXT_5GHZ(pa_type)	(((pa_type) & 0x01) == 0x01)
 
 	uint8_t			lna_type_2g;
-#define R8821A_ROM_LNA_TYPE_EXTERNAL_2GHZ	0x08
+#define R8812A_ROM_IS_LNA_EXT(lna_type)		(((lna_type) & 0x88) == 0x88)
+#define R8821A_ROM_IS_LNA_EXT(lna_type)		(((lna_type) & 0x08) == 0x08)
+
+/* XXX */
+#define R8812A_GET_ROM_PA_TYPE(lna_type, chain)		\
+	(((lna_type) >> ((chain) * 4 + 2)) & 0x01)
+#define R8812A_GET_ROM_LNA_TYPE(lna_type, chain)	\
+	(((lna_type) >> ((chain) * 4)) & 0x03)
 
 	uint8_t			reserved2;
 	uint8_t			lna_type_5g;
-#define R8821A_ROM_LNA_TYPE_EXTERNAL_5GHZ	0x08
-
 	uint8_t			reserved3;
 	uint8_t			rf_board_opt;
 #define R92C_ROM_RF1_REGULATORY_M	0x07
 #define R92C_ROM_RF1_REGULATORY_S	0
 #define R92C_ROM_RF1_BOARD_TYPE_M	0xe0
 #define R92C_ROM_RF1_BOARD_TYPE_S	5
+#define R92C_BOARD_TYPE_DONGLE		0
+#define R92C_BOARD_TYPE_HIGHPA		1
+#define R92C_BOARD_TYPE_MINICARD	2
+#define R92C_BOARD_TYPE_SOLO		3
+#define R92C_BOARD_TYPE_COMBO		4
+#define R88A_BOARD_TYPE_COMBO_MF	5
 
 	uint8_t			rf_feature_opt;
 	uint8_t			rf_bt_opt;
