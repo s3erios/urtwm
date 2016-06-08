@@ -1062,9 +1062,13 @@ urtwm_rx_frame(struct urtwm_softc *sc, struct mbuf *m, int8_t *rssi_p)
 
 		/* Map HW rate index to 802.11 rate. */
 		/* XXX HT check does not work. */
+#ifdef URTWM_TODO
 		if (!(rxdw3 & R92C_RXDW3_HT)) {
+#else
+		if (rate < URTWM_RIDX_MCS(0)) {
+#endif
 			tap->wr_rate = ridx2rate[rate];
-		} else if (rate >= 12) {	/* MCS0~15. */
+		} else if (rate >= URTWM_RIDX_MCS(0)) {		/* MCS0~15. */
 			/* Bit 7 set means HT MCS instead of rate. */
 			tap->wr_rate = 0x80 | (rate - 12);
 		}
