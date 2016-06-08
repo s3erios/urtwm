@@ -4866,7 +4866,7 @@ urtwm_update_slot_cb(struct urtwm_softc *sc, union sec_param *data)
 
 	slottime = IEEE80211_GET_SLOTTIME(ic);
 
-	URTWM_DPRINTF(sc, URTWM_DEBUG_ANY, "%s: setting slot time to %uus\n",
+	URTWM_DPRINTF(sc, URTWM_DEBUG_STATE, "%s: setting slot time to %uus\n",
 	    __func__, slottime);
 
 	urtwm_write_1(sc, R92C_SLOT, slottime);
