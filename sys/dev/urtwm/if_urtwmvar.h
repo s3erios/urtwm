@@ -214,10 +214,20 @@ struct urtwm_softc {
 			    unsigned long);
 
 	/* device-specific */
+	int		(*sc_check_condition)(struct urtwm_softc *,
+			    const uint8_t[]);
 	void		(*sc_parse_rom)(struct urtwm_softc *,
 			    struct r88a_rom *);
 	int		(*sc_power_on)(struct urtwm_softc *);
 	void		(*sc_power_off)(struct urtwm_softc *);
+
+	const struct urtwm_mac_prog	*mac_prog;
+	int				mac_size;
+	const struct urtwm_bb_prog	*bb_prog;
+	int				bb_size;
+	const struct urtwm_agc_prog	*agc_prog;
+	int				agc_size;
+	const struct urtwm_rf_prog	*rf_prog;
 };
 
 #define	URTWM_LOCK(sc)			mtx_lock(&(sc)->sc_mtx)

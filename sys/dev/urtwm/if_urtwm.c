@@ -96,6 +96,7 @@ enum {
 	URTWM_DEBUG_KEY		= 0x00000400,	/* crypto keys management */
 	URTWM_DEBUG_TXPWR	= 0x00000800,	/* dump Tx power values */
 	URTWM_DEBUG_RSSI	= 0x00001000,	/* dump RSSI lookups */
+	URTWM_DEBUG_RESET	= 0x00002000,	/* initialization progress */
 	URTWM_DEBUG_ANY		= 0xffffffff
 };
 
@@ -226,6 +227,10 @@ static int		urtwm_efuse_read(struct urtwm_softc *, uint8_t *,
 static int		urtwm_efuse_switch_power(struct urtwm_softc *);
 static int		urtwm_setup_endpoints(struct urtwm_softc *);
 static int		urtwm_read_chipid(struct urtwm_softc *);
+static int		urtwm_r12a_check_condition(struct urtwm_softc *,
+			    const uint8_t[]);
+static int		urtwm_r21a_check_condition(struct urtwm_softc *,
+			    const uint8_t[]);
 static void		urtwm_config_specific(struct urtwm_softc *);
 static int		urtwm_read_rom(struct urtwm_softc *);
 static void		urtwm_r12a_parse_rom(struct urtwm_softc *,
@@ -313,6 +318,8 @@ static int		urtwm_dma_init(struct urtwm_softc *);
 static int		urtwm_mac_init(struct urtwm_softc *);
 static void		urtwm_bb_init(struct urtwm_softc *);
 static void		urtwm_rf_init(struct urtwm_softc *);
+static int		urtwm_rf_init_chain(struct urtwm_softc *,
+			    const struct urtwm_rf_prog *, int);
 static void		urtwm_arfb_init(struct urtwm_softc *);
 static void		urtwm_band_change(struct urtwm_softc *,
 			    struct ieee80211_channel *, int);
@@ -372,6 +379,8 @@ static void		urtwm_delay(struct urtwm_softc *, int);
 #define urtwm_bb_read		urtwm_read_4
 #define urtwm_bb_setbits	urtwm_setbits_4
 
+#define urtwm_check_condition(_sc, _cond) \
+	(((_sc)->sc_check_condition)((_sc), (_cond)))
 #define urtwm_parse_rom_specific(_sc, _rom) \
 	(((_sc)->sc_parse_rom)((_sc), (_rom)))
 #define urtwm_power_on(_sc) \
@@ -522,7 +531,7 @@ urtwm_attach(device_t self)
 		goto detach;
 	}
 
-	/* Setup device-specific configuration. */
+	/* Setup device-specific configuration (before ROM parsing). */
 	urtwm_config_specific(sc);
 
 	error = urtwm_read_rom(sc);
@@ -1939,21 +1948,122 @@ urtwm_read_chipid(struct urtwm_softc *sc)
 	return (0);
 }
 
+static int
+urtwm_r12a_check_condition(struct urtwm_softc *sc, const uint8_t cond[])
+{
+	uint8_t mask[4];
+	int i, j, nmasks;
+
+	URTWM_DPRINTF(sc, URTWM_DEBUG_RESET,
+	    "%s: condition byte 0: %02X; ext PA/LNA: %d/%d (2 GHz), "
+	    "%d/%d (5 GHz)\n", __func__, cond[0], sc->ext_pa_2g,
+	    sc->ext_lna_2g, sc->ext_pa_5g, sc->ext_lna_5g);
+
+	if (cond[0] == 0)
+		return (1);
+
+	if (!sc->ext_pa_2g && !sc->ext_lna_2g &&
+	    !sc->ext_pa_5g && !sc->ext_lna_5g)
+		return (0);
+
+	nmasks = 0;
+	if (sc->ext_pa_2g) {
+		mask[nmasks] = R8812A_COND_GPA;
+		mask[nmasks] |= R8812A_COND_TYPE(sc->type_pa_2g);
+		nmasks++;
+	}
+	if (sc->ext_pa_5g) {
+		mask[nmasks] = R8812A_COND_APA;
+		mask[nmasks] |= R8812A_COND_TYPE(sc->type_pa_5g);
+		nmasks++;
+	}
+	if (sc->ext_lna_2g) {
+		mask[nmasks] = R8812A_COND_GLNA;
+		mask[nmasks] |= R8812A_COND_TYPE(sc->type_lna_2g);
+		nmasks++;
+	}
+	if (sc->ext_lna_5g) {
+		mask[nmasks] = R8812A_COND_ALNA;
+		mask[nmasks] |= R8812A_COND_TYPE(sc->type_lna_5g);
+		nmasks++;
+	}
+
+	for (i = 0; i < URTWM_MAX_CONDITIONS && cond[i] != 0; i++)
+		for (j = 0; j < nmasks; j++)
+			if ((cond[i] & mask[j]) == mask[j])
+				return (1);
+
+	return (0);
+}
+
+static int
+urtwm_r21a_check_condition(struct urtwm_softc *sc, const uint8_t cond[])
+{
+	uint8_t mask;
+	int i;
+
+	URTWM_DPRINTF(sc, URTWM_DEBUG_RESET,
+	    "%s: condition byte 0: %02X; ext 5ghz pa/lna %d/%d\n",
+	    __func__, cond[0], sc->ext_pa_5g, sc->ext_lna_5g);
+
+	if (cond[0] == 0)
+		return (1);
+
+	mask = 0;
+	if (sc->ext_pa_5g)
+		mask |= R8821A_COND_EXT_PA_5G;
+	if (sc->ext_lna_5g)
+		mask |= R8821A_COND_EXT_LNA_5G;
+	if (!sc->ext_pa_2g && !sc->ext_lna_2g &&
+	    !sc->ext_pa_5g && !sc->ext_lna_5g)
+		mask = R8821A_COND_BOARD_DEF;
+
+	/* XXX BT? */
+	/* XXX board type? */
+
+	if (mask == 0)
+		return (0);
+
+	for (i = 0; i < URTWM_MAX_CONDITIONS && cond[i] != 0; i++)
+		if (cond[i] == mask)
+			return (1);
+
+	return (0);
+}
+
 static void
 urtwm_config_specific(struct urtwm_softc *sc)
 {
 
 	if (URTWM_CHIP_IS_12A(sc)) {
+		sc->sc_check_condition = urtwm_r12a_check_condition;
 		sc->sc_parse_rom = urtwm_r12a_parse_rom;
 		sc->sc_power_on = urtwm_r12a_power_on;
 		sc->sc_power_off = urtwm_r12a_power_off;
 
+		sc->mac_prog = &rtl8812au_mac[0];
+		sc->mac_size = nitems(rtl8812au_mac);
+		sc->bb_prog = &rtl8812au_bb[0];
+		sc->bb_size = nitems(rtl8812au_bb);
+		sc->agc_prog = &rtl8812au_agc[0];
+		sc->agc_size = nitems(rtl8812au_agc);
+		sc->rf_prog = &rtl8812au_rf[0];
+
 		sc->ntxchains = 2;
 		sc->nrxchains = 2;
 	} else {
+		sc->sc_check_condition = urtwm_r21a_check_condition;
 		sc->sc_parse_rom = urtwm_r21a_parse_rom;
 		sc->sc_power_on = urtwm_r21a_power_on;
 		sc->sc_power_off = urtwm_r21a_power_off;
+
+		sc->mac_prog = &rtl8821au_mac[0];
+		sc->mac_size = nitems(rtl8821au_mac);
+		sc->bb_prog = &rtl8821au_bb[0];
+		sc->bb_size = nitems(rtl8821au_bb);
+		sc->agc_prog = &rtl8821au_agc[0];
+		sc->agc_size = nitems(rtl8821au_agc);
+		sc->rf_prog = &rtl8821au_rf[0];
 
 		sc->ntxchains = 1;
 		sc->nrxchains = 1;
@@ -4200,9 +4310,9 @@ urtwm_mac_init(struct urtwm_softc *sc)
 	int i;
 
 	/* Write MAC initialization values. */
-	for (i = 0; i < nitems(rtl8821au_mac); i++) {
-		error = urtwm_write_1(sc, rtl8821au_mac[i].reg,
-		    rtl8821au_mac[i].val);
+	for (i = 0; i < sc->mac_size; i++) {
+		error = urtwm_write_1(sc, sc->mac_prog[i].reg,
+		    sc->mac_prog[i].val);
 		if (error != USB_ERR_NORMAL_COMPLETION)
 			return (EIO);
 	}
@@ -4213,8 +4323,7 @@ urtwm_mac_init(struct urtwm_softc *sc)
 static void
 urtwm_bb_init(struct urtwm_softc *sc)
 {
-	const struct urtwm_bb_prog *prog;
-	int i;
+	int i, j;
 
 	urtwm_setbits_1(sc, R92C_SYS_FUNC_EN, 0, R92C_SYS_FUNC_EN_USBA);
 
@@ -4230,80 +4339,108 @@ urtwm_bb_init(struct urtwm_softc *sc)
 	urtwm_write_1(sc, R88A_RF_B_CTRL,
 	    R92C_RF_CTRL_EN | R92C_RF_CTRL_RSTB | R92C_RF_CTRL_SDMRSTB);
 
-	/* Select BB programming based on board type. */
-	if (sc->ext_pa_5g && sc->ext_lna_5g)
-		prog = &rtl8821au_ext_5ghz_bb_prog;
-	else
-		prog = &rtl8821au_bb_prog;
-
 	/* Write BB initialization values. */
-	for (i = 0; i < prog->count; i++) {
-		urtwm_bb_write(sc, prog->regs[i], prog->vals[i]);
-		urtwm_delay(sc, 1);
+	for (i = 0; i < sc->bb_size; i++) {
+		const struct urtwm_bb_prog *bb_prog = &sc->bb_prog[i];
+
+		while (!urtwm_check_condition(sc, bb_prog->cond)) {
+			KASSERT(bb_prog->next != NULL,
+			    ("%s: wrong condition value (i %d)\n",
+			    __func__, i));
+			bb_prog = bb_prog->next;
+		}
+
+		for (j = 0; j < bb_prog->count; j++) {
+			URTWM_DPRINTF(sc, URTWM_DEBUG_RESET,
+			    "BB: reg 0x%03x, val 0x%08x\n",
+			    bb_prog->reg[j], bb_prog->val[j]);
+
+			urtwm_bb_write(sc, bb_prog->reg[j], bb_prog->val[j]);
+			urtwm_delay(sc, 1);
+		}
 	}
 
 	/* XXX meshpoint mode? */
 
 	/* Write AGC values. */
-	for (i = 0; i < prog->agccount; i++) {
-		urtwm_bb_write(sc, 0x81C, prog->agcvals[i]);
-		urtwm_delay(sc, 1);
+	for (i = 0; i < sc->agc_size; i++) {
+		const struct urtwm_agc_prog *agc_prog = &sc->agc_prog[i];
+
+		while (!urtwm_check_condition(sc, agc_prog->cond)) {
+			KASSERT(agc_prog->next != NULL,
+			    ("%s: wrong condition value (2) (i %d)\n",
+			    __func__, i));
+			agc_prog = agc_prog->next;
+		}
+
+		for (j = 0; j < agc_prog->count; j++) {
+			URTWM_DPRINTF(sc, URTWM_DEBUG_RESET,
+			    "AGC: val 0x%08x\n", agc_prog->val[j]);
+
+			urtwm_bb_write(sc, 0x81c, agc_prog->val[j]);
+			urtwm_delay(sc, 1);
+		}
 	}
 
-	urtwm_bb_write(sc, R92C_OFDM0_AGCCORE1(0), 0x00000022);
-	urtwm_delay(sc, 1);
-	urtwm_bb_write(sc, R92C_OFDM0_AGCCORE1(0), 0x00000020);
-	urtwm_delay(sc, 1);
+	for (i = 0; i < sc->nrxchains; i++) {
+		urtwm_bb_write(sc, R88A_INITIAL_GAIN(i), 0x22);
+		urtwm_delay(sc, 1);
+		urtwm_bb_write(sc, R88A_INITIAL_GAIN(i), 0x20);
+		urtwm_delay(sc, 1);
+	}
 }
 
 static void
 urtwm_rf_init(struct urtwm_softc *sc)
 {
-	const struct urtwm_rf_prog *prog;
+	int chain, i;
+
+	for (chain = 0, i = 0; chain < sc->nrxchains; chain++, i++) {
+		/* Write RF initialization values for this chain. */
+		i += urtwm_rf_init_chain(sc, &sc->rf_prog[i], chain);
+	}
+}
+
+static int
+urtwm_rf_init_chain(struct urtwm_softc *sc,
+    const struct urtwm_rf_prog *rf_prog, int chain)
+{
 	int i, j;
 
-	/* Select RF programming based on board type. */
-	if (!sc->ext_pa_5g && !sc->ext_lna_5g)
-		prog = rtl8821au_rf_prog;
-	else if (sc->ext_pa_5g && sc->ext_lna_5g)
-		prog = rtl8821au_ext_5ghz_rf_prog;
-	else
-		prog = rtl8821au_1_rf_prog;
+	URTWM_DPRINTF(sc, URTWM_DEBUG_RESET, "%s: chain %d\n",
+	    __func__, chain);
 
-	for (i = 0; i < sc->nrxchains; i++) {
-		/* Write RF initialization values for this chain. */
-		for (j = 0; j < prog[i].count; j++) {
-			switch (prog[i].regs[j]) {
+	for (i = 0; rf_prog[i].reg != NULL; i++) {
+		const struct urtwm_rf_prog *prog = &rf_prog[i];
+
+		while (!urtwm_check_condition(sc, prog->cond)) {
+			KASSERT(prog->next != NULL,
+			    ("%s: wrong condition value (i %d)\n",
+			    __func__, i));
+			prog = prog->next;
+		}
+
+		for (j = 0; j < prog->count; j++) {
+			URTWM_DPRINTF(sc, URTWM_DEBUG_RESET,
+			    "RF: reg 0x%02x, val 0x%05x\n",
+			    prog->reg[j], prog->val[j]);
+
 			/*
 			 * These are fake RF registers offsets that
 			 * indicate a delay is required.
 			 */
-			case 0xfe:
-				urtwm_delay(sc, 50000);
-				break;
-			case 0xfd:
-				urtwm_delay(sc, 5000);
-				break;
-			case 0xfc:
-				urtwm_delay(sc, 1000);
-				break;
-			case 0xfb:
-				urtwm_delay(sc, 50);
-				break;
-			case 0xfa:
-				urtwm_delay(sc, 5);
-				break;
-			case 0xf9:
-				urtwm_delay(sc, 1);
-				break;
-			default:
-				urtwm_rf_write(sc, i, prog[i].regs[j],
-				    prog[i].vals[j]);
-				urtwm_delay(sc, 1);
-				break;
+			/* NB: we are using 'value' to store required delay. */
+			if (prog->reg[j] > 0xf8) {
+				urtwm_delay(sc, prog->val[j]);
+				continue;
 			}
+
+			urtwm_rf_write(sc, chain, prog->reg[j], prog->val[j]);
+			urtwm_delay(sc, 1);
 		}
 	}
+
+	return (i);
 }
 
 static void
