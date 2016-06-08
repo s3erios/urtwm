@@ -4158,8 +4158,8 @@ urtwm_load_firmware(struct urtwm_softc *sc)
 	}
 
 	len = fw->datasize;
-	if (len < sizeof(*hdr)) {
-		device_printf(sc->sc_dev, "firmware too short\n");
+	if (len < sizeof(*hdr) || len > R88A_MAX_FW_SIZE) {
+		device_printf(sc->sc_dev, "wrong firmware size (%d)\n", len);
 		error = EINVAL;
 		goto fail;
 	}

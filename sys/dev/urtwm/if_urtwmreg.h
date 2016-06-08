@@ -997,6 +997,8 @@ struct r92c_fw_hdr {
 	uint32_t	reserved5;
 } __packed;
 
+#define R88A_MAX_FW_SIZE		0x8000
+
 /*
  * Host to firmware commands.
  */
