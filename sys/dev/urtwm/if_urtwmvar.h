@@ -178,7 +178,10 @@ struct urtwm_softc {
 	int			ledlink;
 	int			sc_ant;
 
+	const char		*fwname;
+	uint16_t		fwsig;
 	int			fwcur;
+
 	struct urtwm_data	sc_rx[URTWM_RX_LIST_COUNT];
 	urtwm_datahead		sc_rx_active;
 	urtwm_datahead		sc_rx_inactive;
@@ -220,6 +223,7 @@ struct urtwm_softc {
 			    struct r88a_rom *);
 	int		(*sc_power_on)(struct urtwm_softc *);
 	void		(*sc_power_off)(struct urtwm_softc *);
+	void		(*sc_fw_reset)(struct urtwm_softc *);
 	void		(*sc_crystalcap_write)(struct urtwm_softc *);
 
 	const struct urtwm_mac_prog	*mac_prog;

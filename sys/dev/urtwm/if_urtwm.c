@@ -308,7 +308,8 @@ static void		urtwm_r12a_power_off(struct urtwm_softc *);
 static void		urtwm_r21a_power_off(struct urtwm_softc *);
 static int		urtwm_llt_init(struct urtwm_softc *);
 #ifndef URTWM_WITHOUT_UCODE
-static void		urtwm_fw_reset(struct urtwm_softc *);
+static void		urtwm_r12a_fw_reset(struct urtwm_softc *);
+static void		urtwm_r21a_fw_reset(struct urtwm_softc *);
 static usb_error_t	urtwm_fw_loadpage(struct urtwm_softc *, int,
 			    const uint8_t *, int);
 static int		urtwm_fw_checksum_report(struct urtwm_softc *);
@@ -389,6 +390,8 @@ static void		urtwm_delay(struct urtwm_softc *, int);
 	(((_sc)->sc_power_on)((_sc)))
 #define urtwm_power_off(_sc) \
 	(((_sc)->sc_power_off)((_sc)))
+#define urtwm_fw_reset(_sc) \
+	(((_sc)->sc_fw_reset)((_sc)))
 #define urtwm_crystalcap_write(_sc) \
 	(((_sc)->sc_crystalcap_write)((_sc)))
 
@@ -2044,6 +2047,7 @@ urtwm_config_specific(struct urtwm_softc *sc)
 		sc->sc_parse_rom = urtwm_r12a_parse_rom;
 		sc->sc_power_on = urtwm_r12a_power_on;
 		sc->sc_power_off = urtwm_r12a_power_off;
+		sc->sc_fw_reset = urtwm_r12a_fw_reset;
 		sc->sc_crystalcap_write = urtwm_r12a_crystalcap_write;
 
 		sc->mac_prog = &rtl8812au_mac[0];
@@ -2054,6 +2058,9 @@ urtwm_config_specific(struct urtwm_softc *sc)
 		sc->agc_size = nitems(rtl8812au_agc);
 		sc->rf_prog = &rtl8812au_rf[0];
 
+		sc->fwname = "urtwm-rtl8812aufw";
+		sc->fwsig = 0x950;
+
 		sc->ntxchains = 2;
 		sc->nrxchains = 2;
 	} else {
@@ -2061,6 +2068,7 @@ urtwm_config_specific(struct urtwm_softc *sc)
 		sc->sc_parse_rom = urtwm_r21a_parse_rom;
 		sc->sc_power_on = urtwm_r21a_power_on;
 		sc->sc_power_off = urtwm_r21a_power_off;
+		sc->sc_fw_reset = urtwm_r21a_fw_reset;
 		sc->sc_crystalcap_write = urtwm_r21a_crystalcap_write;
 
 		sc->mac_prog = &rtl8821au_mac[0];
@@ -2070,6 +2078,9 @@ urtwm_config_specific(struct urtwm_softc *sc)
 		sc->agc_prog = &rtl8821au_agc[0];
 		sc->agc_size = nitems(rtl8821au_agc);
 		sc->rf_prog = &rtl8821au_rf[0];
+
+		sc->fwname = "urtwm-rtl8821aufw";
+		sc->fwsig = 0x210;
 
 		sc->ntxchains = 1;
 		sc->nrxchains = 1;
@@ -4045,7 +4056,23 @@ urtwm_llt_init(struct urtwm_softc *sc)
 
 #ifndef URTWM_WITHOUT_UCODE
 static void
-urtwm_fw_reset(struct urtwm_softc *sc)
+urtwm_r12a_fw_reset(struct urtwm_softc *sc)
+{
+	/* Reset MCU IO wrapper. */
+	urtwm_setbits_1(sc, R92C_RSV_CTRL + 1, 0x08, 0);
+
+	urtwm_setbits_1_shift(sc, R92C_SYS_FUNC_EN,
+	    R92C_SYS_FUNC_EN_CPUEN, 0, 1);
+
+	/* Enable MCU IO wrapper. */
+	urtwm_setbits_1(sc, R92C_RSV_CTRL + 1, 0, 0x08);
+
+	urtwm_setbits_1_shift(sc, R92C_SYS_FUNC_EN,
+	    0, R92C_SYS_FUNC_EN_CPUEN, 1);
+}
+
+static void
+urtwm_r21a_fw_reset(struct urtwm_softc *sc)
 {
 
 	/* Reset MCU IO wrapper. */
@@ -4116,20 +4143,17 @@ urtwm_load_firmware(struct urtwm_softc *sc)
 {
 	const struct firmware *fw;
 	const struct r92c_fw_hdr *hdr;
-	const char *imagename;
 	const u_char *ptr, *ptr2;
 	size_t len, len2;
 	int mlen, ntries, page, error;
 
 	/* Read firmware image from the filesystem. */
-	imagename = "urtwm-rtl8821aufw";
-
 	URTWM_UNLOCK(sc);
-	fw = firmware_get(imagename);
+	fw = firmware_get(sc->fwname);
 	URTWM_LOCK(sc);
 	if (fw == NULL) {
 		device_printf(sc->sc_dev,
-		    "failed loadfirmware of file %s\n", imagename);
+		    "failed loadfirmware of file %s\n", sc->fwname);
 		return (ENOENT);
 	}
 
@@ -4142,8 +4166,7 @@ urtwm_load_firmware(struct urtwm_softc *sc)
 	ptr = fw->data;
 	hdr = (const struct r92c_fw_hdr *)ptr;
 	/* Check if there is a valid FW header and skip it. */
-	if ((le16toh(hdr->signature) >> 4) == 0x210 ||	/* 8821 */
-	    (le16toh(hdr->signature) >> 4) == 0x950) {	/* 8812 */
+	if ((le16toh(hdr->signature) >> 4) == sc->fwsig) {
 		URTWM_DPRINTF(sc, URTWM_DEBUG_FIRMWARE,
 		    "FW V%d.%d %02d-%02d %02d:%02d\n",
 		    le16toh(hdr->version), le16toh(hdr->subversion),
