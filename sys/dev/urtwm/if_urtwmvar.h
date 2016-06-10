@@ -138,6 +138,7 @@ struct urtwm_softc {
 
 	uint8_t			chip;
 #define URTWM_CHIP_12A		0x01
+#define URTWM_CHIP_12A_C_CUT	0x02
 
 #define URTWM_CHIP_IS_12A(_sc)	!!((_sc)->chip & URTWM_CHIP_12A)
 #define URTWM_CHIP_IS_21A(_sc)	!((_sc)->chip & URTWM_CHIP_12A)
@@ -217,6 +218,7 @@ struct urtwm_softc {
 			    unsigned long);
 
 	/* device-specific */
+	uint32_t	(*sc_rf_read)(struct urtwm_softc *, int, uint8_t);
 	int		(*sc_check_condition)(struct urtwm_softc *,
 			    const uint8_t[]);
 	void		(*sc_parse_rom)(struct urtwm_softc *,

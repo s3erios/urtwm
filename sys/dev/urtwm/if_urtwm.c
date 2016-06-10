@@ -210,7 +210,8 @@ static int		urtwm_cmd_sleepable(struct urtwm_softc *, const void *,
 			    size_t, CMD_FUNC_PROTO);
 static void		urtwm_rf_write(struct urtwm_softc *, int,
 			    uint8_t, uint32_t);
-static uint32_t		urtwm_rf_read(struct urtwm_softc *, int, uint8_t);
+static uint32_t		urtwm_r12a_rf_read(struct urtwm_softc *, int, uint8_t);
+static uint32_t		urtwm_r21a_rf_read(struct urtwm_softc *, int, uint8_t);
 static void		urtwm_rf_setbits(struct urtwm_softc *, int, uint8_t,
 			    uint32_t, uint32_t);
 static int		urtwm_llt_write(struct urtwm_softc *, uint32_t,
@@ -382,6 +383,8 @@ static void		urtwm_delay(struct urtwm_softc *, int);
 #define urtwm_bb_read		urtwm_read_4
 #define urtwm_bb_setbits	urtwm_setbits_4
 
+#define urtwm_rf_read(_sc, _chain, _addr) \
+	(((_sc)->sc_rf_read)((_sc), (_chain), (_addr)))
 #define urtwm_check_condition(_sc, _cond) \
 	(((_sc)->sc_check_condition)((_sc), (_cond)))
 #define urtwm_parse_rom_specific(_sc, _rom) \
@@ -1662,7 +1665,32 @@ urtwm_rf_write(struct urtwm_softc *sc, int chain, uint8_t addr,
 }
 
 static uint32_t
-urtwm_rf_read(struct urtwm_softc *sc, int chain, uint8_t addr)
+urtwm_r12a_rf_read(struct urtwm_softc *sc, int chain, uint8_t addr)
+{
+	uint32_t pi_mode, val;
+
+	/* Turn off CCA (avoids reading the wrong value). */
+	if (addr != R92C_RF_AC)
+		urtwm_bb_setbits(sc, R88A_CCA_ON_SEC, 0, 0x08);
+
+	val = urtwm_bb_read(sc, R88A_HSSI_PARAM1(chain));
+	pi_mode = (val & R88A_HSSI_PARAM1_PI) ? 1 : 0;
+
+	urtwm_bb_setbits(sc, R88A_HSSI_PARAM2,
+	    R88A_HSSI_PARAM2_READ_ADDR_MASK, addr);
+
+	val = urtwm_bb_read(sc, pi_mode ? R88A_HSPI_READBACK(chain) :
+	    R88A_LSSI_READBACK(chain));
+
+	/* Turn on CCA (when exiting). */
+	if (addr != R92C_RF_AC)
+		urtwm_bb_setbits(sc, R88A_CCA_ON_SEC, 0x08, 0);
+
+	return (MS(val, R92C_LSSI_READBACK_DATA));
+}
+
+static uint32_t
+urtwm_r21a_rf_read(struct urtwm_softc *sc, int chain, uint8_t addr)
 {
 	uint32_t pi_mode, val;
 
@@ -1956,6 +1984,11 @@ urtwm_read_chipid(struct urtwm_softc *sc)
 	if (reg & R92C_SYS_CFG_TRP_VAUX_EN)	/* test chip */
 		return (EIO);
 
+	if (URTWM_CHIP_IS_12A(sc)) {
+		if (MS(reg, R92C_SYS_CFG_CHIP_VER_RTL) == 1)
+			sc->chip |= URTWM_CHIP_12A_C_CUT;
+	}
+
 	return (0);
 }
 
@@ -2047,6 +2080,10 @@ urtwm_config_specific(struct urtwm_softc *sc)
 {
 
 	if (URTWM_CHIP_IS_12A(sc)) {
+		if (sc->chip & URTWM_CHIP_12A_C_CUT)
+			sc->sc_rf_read = urtwm_r21a_rf_read;
+		else
+			sc->sc_rf_read = urtwm_r12a_rf_read;
 		sc->sc_check_condition = urtwm_r12a_check_condition;
 		sc->sc_parse_rom = urtwm_r12a_parse_rom;
 		sc->sc_power_on = urtwm_r12a_power_on;
@@ -2068,6 +2105,7 @@ urtwm_config_specific(struct urtwm_softc *sc)
 		sc->ntxchains = 2;
 		sc->nrxchains = 2;
 	} else {
+		sc->sc_rf_read = urtwm_r21a_rf_read;
 		sc->sc_check_condition = urtwm_r21a_check_condition;
 		sc->sc_parse_rom = urtwm_r21a_parse_rom;
 		sc->sc_power_on = urtwm_r21a_power_on;
