@@ -224,6 +224,7 @@ struct urtwm_softc {
 			    const uint8_t[]);
 	void		(*sc_parse_rom)(struct urtwm_softc *,
 			    struct r88a_rom *);
+	void		(*sc_set_led)(struct urtwm_softc *, int, int);
 	int		(*sc_power_on)(struct urtwm_softc *);
 	void		(*sc_power_off)(struct urtwm_softc *);
 	void		(*sc_fw_reset)(struct urtwm_softc *);

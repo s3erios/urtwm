@@ -233,6 +233,7 @@ static int		urtwm_r12a_check_condition(struct urtwm_softc *,
 static int		urtwm_r21a_check_condition(struct urtwm_softc *,
 			    const uint8_t[]);
 static void		urtwm_config_specific(struct urtwm_softc *);
+static void		urtwm_config_specific_rom(struct urtwm_softc *);
 static int		urtwm_read_rom(struct urtwm_softc *);
 static void		urtwm_r12a_parse_rom(struct urtwm_softc *,
 			    struct r88a_rom *);
@@ -270,7 +271,10 @@ static void		urtwm_tsf_sync_enable(struct urtwm_softc *,
 static uint32_t		urtwm_get_tsf_low(struct urtwm_softc *, int);
 static uint32_t		urtwm_get_tsf_high(struct urtwm_softc *, int);
 static void		urtwm_get_tsf(struct urtwm_softc *, uint64_t *, int);
-static void		urtwm_set_led(struct urtwm_softc *, int, int);
+static void		urtwm_r12a_set_led_mini(struct urtwm_softc *, int,
+			    int);
+static void		urtwm_r12a_set_led(struct urtwm_softc *, int, int);
+static void		urtwm_r21a_set_led(struct urtwm_softc *, int, int);
 static void		urtwm_set_mode(struct urtwm_softc *, uint8_t, int);
 static void		urtwm_adhoc_recv_mgmt(struct ieee80211_node *,
 			    struct mbuf *, int,
@@ -398,6 +402,8 @@ static void		urtwm_delay(struct urtwm_softc *, int);
 	(((_sc)->sc_check_condition)((_sc), (_cond)))
 #define urtwm_parse_rom_specific(_sc, _rom) \
 	(((_sc)->sc_parse_rom)((_sc), (_rom)))
+#define urtwm_set_led(_sc, _led, _on) \
+	(((_sc)->sc_set_led)((_sc), (_led), (_on)))
 #define urtwm_power_on(_sc) \
 	(((_sc)->sc_power_on)((_sc)))
 #define urtwm_power_off(_sc) \
@@ -565,6 +571,9 @@ urtwm_attach(device_t self)
 		    __func__, error);
 		goto detach;
 	}
+
+	/* Setup device-specific configuration (after ROM parsing). */
+	urtwm_config_specific_rom(sc);
 
 	device_printf(sc->sc_dev, "MAC/BB RTL%sAU, RF 6052 %dT%dR\n",
 	    URTWM_CHIP_IS_12A(sc) ? "8812" : "8821",
@@ -2162,6 +2171,26 @@ urtwm_config_specific(struct urtwm_softc *sc)
 	}
 }
 
+static void
+urtwm_config_specific_rom(struct urtwm_softc *sc)
+{
+	if (URTWM_CHIP_IS_12A(sc)) {
+		if (sc->board_type == R92C_BOARD_TYPE_MINICARD ||
+		    sc->board_type == R92C_BOARD_TYPE_SOLO ||
+		    sc->board_type == R92C_BOARD_TYPE_COMBO)
+			sc->sc_set_led = urtwm_r12a_set_led_mini;
+		else
+			sc->sc_set_led = urtwm_r12a_set_led;
+	} else {
+		if (sc->board_type == R92C_BOARD_TYPE_MINICARD ||
+		    sc->board_type == R92C_BOARD_TYPE_SOLO ||
+		    sc->board_type == R92C_BOARD_TYPE_COMBO)
+			sc->sc_set_led = urtwm_r12a_set_led_mini;
+		else
+			sc->sc_set_led = urtwm_r21a_set_led;
+	}
+}
+
 static int
 urtwm_read_rom(struct urtwm_softc *sc)
 {
@@ -2886,16 +2915,42 @@ urtwm_get_tsf(struct urtwm_softc *sc, uint64_t *buf, int id)
 }
 
 static void
-urtwm_set_led(struct urtwm_softc *sc, int led, int on)
+urtwm_r12a_set_led_mini(struct urtwm_softc *sc, int led, int on)
 {
-	/* XXX minicard / solo / combo? */
 	if (led == URTWM_LED_LINK) {
 		if (on)
-			urtwm_write_1(sc, R92C_LEDCFG2, R88A_LEDCFG2_ENA);
+			urtwm_setbits_1(sc, R92C_LEDCFG2, 0x0f, 0x60);
 		else {
-			urtwm_write_1(sc, R92C_LEDCFG2,
-			    R88A_LEDCFG2_ENA | R92C_LEDCFG0_DIS);
+			urtwm_setbits_1(sc, R92C_LEDCFG2, 0x6f, 0x08);
+			urtwm_setbits_1(sc, R92C_MAC_PINMUX_CFG, 0x01, 0);
 		}
+		sc->ledlink = on;	/* Save LED state. */
+	}
+
+	/* XXX led #1? */
+}
+
+static void
+urtwm_r12a_set_led(struct urtwm_softc *sc, int led, int on)
+{
+	/* XXX assume led #0 == LED_LINK */
+	/* XXX antenna diversity */
+
+	if (led == URTWM_LED_LINK) {
+		urtwm_setbits_1(sc, R92C_LEDCFG0, 0x8f,
+		    R88A_LEDCFG2_ENA | (on ? 0 : R92C_LEDCFG0_DIS));
+		sc->ledlink = on;	/* Save LED state. */
+	}
+
+	/* XXX leds #1/#2 ? */
+}
+
+static void
+urtwm_r21a_set_led(struct urtwm_softc *sc, int led, int on)
+{
+	if (led == URTWM_LED_LINK) {
+		urtwm_write_1(sc, R92C_LEDCFG2,
+		    R88A_LEDCFG2_ENA | (on ? 0 : R92C_LEDCFG0_DIS));
 		sc->ledlink = on;	/* Save LED state. */
 	}
 }
@@ -4730,6 +4785,7 @@ urtwm_r21a_set_band_2ghz(struct urtwm_softc *sc)
 	/* Enable CCK. */
 	urtwm_bb_setbits(sc, R88A_OFDMCCK_EN, 0,
 	    R88A_OFDMCCK_EN_CCK | R88A_OFDMCCK_EN_OFDM);
+
 	urtwm_write_1(sc, R88A_CCK_CHECK, 0);
 }
 
