@@ -4868,7 +4868,10 @@ urtwm_get_power_group(struct urtwm_softc *sc, struct ieee80211_channel *c)
 			return (-1);
 		}
 	} else if (IEEE80211_IS_CHAN_5GHZ(c)) {
-		if (chan >= 36 && chan <= 42)	group = 0;
+		if (chan < 36)
+			return (-1);
+
+		if (chan <= 42)			group = 0;
 		else if (chan <= 48)		group = 1;
 		else if (chan <= 58)		group = 2;
 		else if (chan <= 64)		group = 3;
