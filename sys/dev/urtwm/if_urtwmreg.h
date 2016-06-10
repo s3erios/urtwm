@@ -682,6 +682,9 @@
 #define R88A_OFDMCCK_EN			0x808
 #define R88A_RX_PATH			R88A_OFDMCCK_EN
 #define R88A_TX_PATH			0x80c
+#define R88A_TXAGC_TABLE_SELECT		0x82c
+#define R88A_PWED_TH			0x830
+#define R88A_BW_INDICATION		0x834
 #define R88A_CCA_ON_SEC			0x838
 #define R88A_L1_PEAK_TH			0x848
 #define R88A_FC_AREA			0x860
@@ -690,6 +693,7 @@
 #define R88A_RFMOD			0x8ac
 #define R88A_HSSI_PARAM2		0x8b0
 #define R88A_ADC_BUF_CLK		0x8c4
+#define R88A_ANTSEL_SW			0x900
 #define R92C_CCK0_SYSTEM		0xa00
 #define R88A_CCK_RX_PATH		0xa04
 #define R88A_HSSI_PARAM1(chain)		(0xc00 + (chain) * 0x200)
@@ -1148,7 +1152,8 @@ struct r88a_rom {
 	uint8_t			tx_bbswing_5g;
 	uint8_t			tx_pwr_calib_rate;
 	uint8_t			rf_ant_opt;
-	uint8_t			reserved4[6];
+	uint8_t			rfe_option;
+	uint8_t			reserved4[5];
 	uint16_t		vid_12a;
 	uint16_t		pid_12a;
 	uint8_t			reserved5[3];

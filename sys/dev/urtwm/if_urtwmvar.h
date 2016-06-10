@@ -155,6 +155,7 @@ struct urtwm_softc {
 	uint8_t			board_type;
 	uint8_t			regulatory;
 	uint8_t			crystalcap;
+	uint8_t			rfe_type;
 	uint8_t			tx_bbswing_2g;
 	uint8_t			tx_bbswing_5g;
 
@@ -228,6 +229,8 @@ struct urtwm_softc {
 	void		(*sc_fw_reset)(struct urtwm_softc *);
 	int		(*sc_set_page_size)(struct urtwm_softc *);
 	void		(*sc_crystalcap_write)(struct urtwm_softc *);
+	void		(*sc_set_band_2ghz)(struct urtwm_softc *);
+	void		(*sc_set_band_5ghz)(struct urtwm_softc *);
 
 	const struct urtwm_mac_prog	*mac_prog;
 	int				mac_size;
