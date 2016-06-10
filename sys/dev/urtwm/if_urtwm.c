@@ -316,6 +316,8 @@ static usb_error_t	urtwm_fw_loadpage(struct urtwm_softc *, int,
 static int		urtwm_fw_checksum_report(struct urtwm_softc *);
 static int		urtwm_load_firmware(struct urtwm_softc *);
 #endif
+static int		urtwm_r12a_set_page_size(struct urtwm_softc *);
+static int		urtwm_r21a_set_page_size(struct urtwm_softc *);
 static int		urtwm_dma_init(struct urtwm_softc *);
 static int		urtwm_mac_init(struct urtwm_softc *);
 static void		urtwm_bb_init(struct urtwm_softc *);
@@ -395,6 +397,8 @@ static void		urtwm_delay(struct urtwm_softc *, int);
 	(((_sc)->sc_power_off)((_sc)))
 #define urtwm_fw_reset(_sc) \
 	(((_sc)->sc_fw_reset)((_sc)))
+#define urtwm_set_page_size(_sc) \
+	(((_sc)->sc_set_page_size)((_sc)))
 #define urtwm_crystalcap_write(_sc) \
 	(((_sc)->sc_crystalcap_write)((_sc)))
 
@@ -2089,6 +2093,7 @@ urtwm_config_specific(struct urtwm_softc *sc)
 		sc->sc_power_on = urtwm_r12a_power_on;
 		sc->sc_power_off = urtwm_r12a_power_off;
 		sc->sc_fw_reset = urtwm_r12a_fw_reset;
+		sc->sc_set_page_size = urtwm_r12a_set_page_size;
 		sc->sc_crystalcap_write = urtwm_r12a_crystalcap_write;
 
 		sc->mac_prog = &rtl8812au_mac[0];
@@ -2102,6 +2107,12 @@ urtwm_config_specific(struct urtwm_softc *sc)
 		sc->fwname = "urtwm-rtl8812aufw";
 		sc->fwsig = 0x950;
 
+		sc->page_count = R8812A_TX_PAGE_COUNT;
+		sc->pktbuf_count = R88A_TXPKTBUF_COUNT;
+		sc->tx_boundary = R8812A_TX_PAGE_BOUNDARY;
+		sc->npubqpages = R88A_PUBQ_NPAGES;
+		sc->rx_dma_size = R88A_RX_DMA_BUFFER_SIZE;
+
 		sc->ntxchains = 2;
 		sc->nrxchains = 2;
 	} else {
@@ -2111,6 +2122,7 @@ urtwm_config_specific(struct urtwm_softc *sc)
 		sc->sc_power_on = urtwm_r21a_power_on;
 		sc->sc_power_off = urtwm_r21a_power_off;
 		sc->sc_fw_reset = urtwm_r21a_fw_reset;
+		sc->sc_set_page_size = urtwm_r21a_set_page_size;
 		sc->sc_crystalcap_write = urtwm_r21a_crystalcap_write;
 
 		sc->mac_prog = &rtl8821au_mac[0];
@@ -2123,6 +2135,12 @@ urtwm_config_specific(struct urtwm_softc *sc)
 
 		sc->fwname = "urtwm-rtl8821aufw";
 		sc->fwsig = 0x210;
+
+		sc->page_count = R8821A_TX_PAGE_COUNT;
+		sc->pktbuf_count = R88A_TXPKTBUF_COUNT;
+		sc->tx_boundary = R8821A_TX_PAGE_BOUNDARY;
+		sc->npubqpages = R88A_PUBQ_NPAGES;
+		sc->rx_dma_size = R88A_RX_DMA_BUFFER_SIZE;
 
 		sc->ntxchains = 1;
 		sc->nrxchains = 1;
@@ -4070,13 +4088,10 @@ urtwm_r21a_power_off(struct urtwm_softc *sc)
 static int
 urtwm_llt_init(struct urtwm_softc *sc)
 {
-	int i, error, page_count, pktbuf_count;
-
-	page_count = R88A_TX_PAGE_COUNT;
-	pktbuf_count = R88A_TXPKTBUF_COUNT;
+	int i, error;
 
 	/* Reserve pages [0; page_count]. */
-	for (i = 0; i < page_count; i++) {
+	for (i = 0; i < sc->page_count; i++) {
 		if ((error = urtwm_llt_write(sc, i, i + 1)) != 0)
 			return (error);
 	}
@@ -4087,12 +4102,12 @@ urtwm_llt_init(struct urtwm_softc *sc)
 	 * Use pages [page_count + 1; pktbuf_count - 1]
 	 * as ring buffer.
 	 */
-	for (++i; i < pktbuf_count - 1; i++) {
+	for (++i; i < sc->pktbuf_count - 1; i++) {
 		if ((error = urtwm_llt_write(sc, i, i + 1)) != 0)
 			return (error);
 	}
 	/* Make the last page point to the beginning of the ring buffer. */
-	error = urtwm_llt_write(sc, i, page_count + 1);
+	error = urtwm_llt_write(sc, i, sc->page_count + 1);
 	return (error);
 }
 
@@ -4279,6 +4294,19 @@ fail:
 #endif
 
 static int
+urtwm_r12a_set_page_size(struct urtwm_softc *sc)
+{
+	return (urtwm_setbits_1(sc, R92C_PBP, R92C_PBP_PSTX_M,
+	    R92C_PBP_512 << R92C_PBP_PSTX_S) == USB_ERR_NORMAL_COMPLETION);
+}
+
+static int
+urtwm_r21a_set_page_size(struct urtwm_softc *sc)
+{
+	return (0);	/* nothing to do */
+}
+
+static int
 urtwm_dma_init(struct urtwm_softc *sc)
 {
 #define URTWM_CHK(res) do {			\
@@ -4287,7 +4315,7 @@ urtwm_dma_init(struct urtwm_softc *sc)
 } while(0)
 	uint16_t reg;
 	int hasnq, haslq, nqueues;
-	int error, pagecount, npubqpages, nqpages, nrempages, tx_boundary;
+	int error, nqpages, nrempages;
 
 	/* Initialize LLT table. */
 	error = urtwm_llt_init(sc);
@@ -4307,25 +4335,21 @@ urtwm_dma_init(struct urtwm_softc *sc)
 	default:
 		break;
 	}
-
 	nqueues = 1 + hasnq + haslq;
-	pagecount = R88A_TX_PAGE_COUNT;
-	npubqpages = R88A_PUBQ_NPAGES;
-	tx_boundary = R88A_TX_PAGE_BOUNDARY;
 
 	/* Get the number of pages for each queue. */
-	nqpages = (pagecount - npubqpages) / nqueues;
+	nqpages = (sc->page_count - sc->npubqpages) / nqueues;
 
 	/* 
 	 * The remaining pages are assigned to the high priority
 	 * queue.
 	 */
-	nrempages = (pagecount - npubqpages) % nqueues;
+	nrempages = (sc->page_count - sc->npubqpages) % nqueues;
 
 	URTWM_CHK(urtwm_write_1(sc, R92C_RQPN_NPQ, hasnq ? nqpages : 0));
 	URTWM_CHK(urtwm_write_4(sc, R92C_RQPN,
 	    /* Set number of pages for public queue. */
-	    SM(R92C_RQPN_PUBQ, npubqpages) |
+	    SM(R92C_RQPN_PUBQ, sc->npubqpages) |
 	    /* Set number of pages for high priority queue. */
 	    SM(R92C_RQPN_HPQ, nqpages + nrempages) |
 	    /* Set number of pages for low priority queue. */
@@ -4334,22 +4358,27 @@ urtwm_dma_init(struct urtwm_softc *sc)
 	    R92C_RQPN_LD));
 
 	/* Initialize TX buffer boundary. */
-	URTWM_CHK(urtwm_write_1(sc, R92C_TXPKTBUF_BCNQ_BDNY, tx_boundary));
-	URTWM_CHK(urtwm_write_1(sc, R92C_TXPKTBUF_MGQ_BDNY, tx_boundary));
+	URTWM_CHK(urtwm_write_1(sc, R92C_TXPKTBUF_BCNQ_BDNY, sc->tx_boundary));
+	URTWM_CHK(urtwm_write_1(sc, R92C_TXPKTBUF_MGQ_BDNY, sc->tx_boundary));
+
 	URTWM_CHK(urtwm_write_1(sc, R92C_TXPKTBUF_WMAC_LBK_BF_HD,
-	    tx_boundary));
-	URTWM_CHK(urtwm_write_1(sc, R92C_TRXFF_BNDY, tx_boundary));
-	URTWM_CHK(urtwm_write_1(sc, R92C_TDECTRL + 1, tx_boundary));
-	URTWM_CHK(urtwm_write_1(sc, R88E_TXPKTBUF_BCNQ1_BDNY,
-	    tx_boundary + 8));
-	URTWM_CHK(urtwm_write_1(sc, R88A_DWBCN1_CTRL + 1, tx_boundary + 8));
-	URTWM_CHK(urtwm_setbits_1(sc, R88A_DWBCN1_CTRL + 2, 0,
-	    R88A_DWBCN1_CTRL_SEL_EN));
+	    sc->tx_boundary));
+	URTWM_CHK(urtwm_write_1(sc, R92C_TRXFF_BNDY, sc->tx_boundary));
+	URTWM_CHK(urtwm_write_1(sc, R92C_TDECTRL + 1, sc->tx_boundary));
+
+	if (URTWM_CHIP_IS_21A(sc)) {	/* XXX use another macro */
+		URTWM_CHK(urtwm_write_1(sc, R88E_TXPKTBUF_BCNQ1_BDNY,
+		    sc->tx_boundary + 8));	/* XXX hardcoded */
+		URTWM_CHK(urtwm_write_1(sc, R88A_DWBCN1_CTRL + 1,
+		    sc->tx_boundary + 8));
+		URTWM_CHK(urtwm_setbits_1(sc, R88A_DWBCN1_CTRL + 2, 0,
+		    R88A_DWBCN1_CTRL_SEL_EN));
+	}
 
 	/* Set queue to USB pipe mapping. */
 	switch (nqueues) {
 	case 1:
-		/* NB: should not happen for RTL8821AU. */
+		/* NB: should not happen for RTL881*AU. */
 		reg = R92C_TRXDMA_CTRL_QMAP_HQ;
 		break;
 	case 2:
@@ -4364,12 +4393,10 @@ urtwm_dma_init(struct urtwm_softc *sc)
 
 	/* Set Tx/Rx transfer page boundary. */
 	URTWM_CHK(urtwm_write_2(sc, R92C_TRXFF_BNDY + 2,
-	    R88A_RX_DMA_BUFFER_SIZE - 1));
+	    sc->rx_dma_size - 1));
 
 	/* Set Tx/Rx transfer page size. */
-	URTWM_CHK(urtwm_write_1(sc, R92C_PBP,
-	    SM(R92C_PBP_PSRX, R92C_PBP_128) |
-	    SM(R92C_PBP_PSTX, R92C_PBP_512)));
+	urtwm_set_page_size(sc);
 
 	return (0);
 }

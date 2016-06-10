@@ -226,6 +226,7 @@ struct urtwm_softc {
 	int		(*sc_power_on)(struct urtwm_softc *);
 	void		(*sc_power_off)(struct urtwm_softc *);
 	void		(*sc_fw_reset)(struct urtwm_softc *);
+	int		(*sc_set_page_size)(struct urtwm_softc *);
 	void		(*sc_crystalcap_write)(struct urtwm_softc *);
 
 	const struct urtwm_mac_prog	*mac_prog;
@@ -235,6 +236,13 @@ struct urtwm_softc {
 	const struct urtwm_agc_prog	*agc_prog;
 	int				agc_size;
 	const struct urtwm_rf_prog	*rf_prog;
+
+	int				page_count;
+	int				pktbuf_count;
+	int				tx_boundary;
+
+	int				npubqpages;  /* XXX for each queue? */
+	uint16_t			rx_dma_size;
 };
 
 #define	URTWM_LOCK(sc)			mtx_lock(&(sc)->sc_mtx)
