@@ -105,6 +105,7 @@
 #define R92C_PCIE_MIO_INTD		0x0e8
 #define R92C_HPON_FSM			0x0ec
 #define R92C_SYS_CFG			0x0f0
+#define R92C_TYPE_ID			0x0fc
 /* MAC General Configuration. */
 #define R92C_CR				0x100
 #define R92C_MSR			0x102
@@ -679,6 +680,8 @@
  * Baseband registers.
  */
 #define R88A_OFDMCCK_EN			0x808
+#define R88A_RX_PATH			R88A_OFDMCCK_EN
+#define R88A_TX_PATH			0x80c
 #define R88A_CCA_ON_SEC			0x838
 #define R88A_L1_PEAK_TH			0x848
 #define R88A_FC_AREA			0x860
@@ -688,6 +691,7 @@
 #define R88A_HSSI_PARAM2		0x8b0
 #define R88A_ADC_BUF_CLK		0x8c4
 #define R92C_CCK0_SYSTEM		0xa00
+#define R88A_CCK_RX_PATH		0xa04
 #define R88A_HSSI_PARAM1(chain)		(0xc00 + (chain) * 0x200)
 #define R88A_TX_SCALE(chain)		(0xc1c + (chain) * 0x200)
 #define R88A_TXAGC_CCK11_1(chain)	(0xc20 + (chain) * 0x200)
@@ -703,6 +707,8 @@
 #define R88A_TXAGC_NSS2IX5_2IX2(chain)	(0xc48 + (chain) * 0x200)
 #define R88A_TXAGC_NSS2IX9_2IX6(chain)	(0xc4c + (chain) * 0x200)
 #define R88A_INITIAL_GAIN(chain)	(0xc50 + (chain) * 0x200)
+#define R88A_AFE_POWER_1(chain)		(0xc60 + (chain) * 0x200)
+#define R88A_AFE_POWER_2(chain)		(0xc64 + (chain) * 0x200)
 #define R92C_OFDM0_AGCCORE1(chain)	(0xc50 + (chain) * 8)
 #define R88A_LSSI_PARAM(chain)		(0xc90 + (chain) * 0x200)
 #define R88A_RFE_PINMUX(chain)		(0xcb0 + (chain) * 0x200)

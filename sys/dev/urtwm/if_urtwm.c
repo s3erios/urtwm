@@ -4360,7 +4360,6 @@ urtwm_dma_init(struct urtwm_softc *sc)
 	/* Initialize TX buffer boundary. */
 	URTWM_CHK(urtwm_write_1(sc, R92C_TXPKTBUF_BCNQ_BDNY, sc->tx_boundary));
 	URTWM_CHK(urtwm_write_1(sc, R92C_TXPKTBUF_MGQ_BDNY, sc->tx_boundary));
-
 	URTWM_CHK(urtwm_write_1(sc, R92C_TXPKTBUF_WMAC_LBK_BF_HD,
 	    sc->tx_boundary));
 	URTWM_CHK(urtwm_write_1(sc, R92C_TRXFF_BNDY, sc->tx_boundary));
@@ -4488,6 +4487,27 @@ urtwm_bb_init(struct urtwm_softc *sc)
 	}
 
 	urtwm_crystalcap_write(sc);
+
+	/* XXX cannot happen yet. */
+	if (URTWM_CHIP_IS_12A(sc) &&
+	    sc->ntxchains == 1 &&
+	    sc->nrxchains == 1) {
+		/* BB OFDM Rx path A. */
+		urtwm_bb_setbits(sc, R88A_RX_PATH, 0xff, 0x11);
+		/* BB OFDM Tx path A. */
+		urtwm_bb_setbits(sc, R88A_TX_PATH, 0xfffffff, 0x1111);
+		/* BB CCK R/Rx path A. */
+		urtwm_bb_setbits(sc, R88A_CCK_RX_PATH, 0x0c000000, 0);
+		/* MCS support. */
+		urtwm_bb_setbits(sc, 0x8bc, 0xc0000060, 0);
+		/* RF Path B HSSI off. */
+		urtwm_bb_setbits(sc, R88A_HSSI_PARAM1(1), 0x0f, 0x04);
+		/* RF Path B power down. */
+		urtwm_bb_write(sc, R88A_LSSI_PARAM(1), 0);
+		/* ADDA Path B off. */
+		urtwm_bb_write(sc, R88A_AFE_POWER_1(1), 0);
+		urtwm_bb_write(sc, R88A_AFE_POWER_2(1), 0);
+	}
 }
 
 static void
@@ -5624,6 +5644,23 @@ urtwm_init(struct urtwm_softc *sc)
 	if (error != 0)
 		goto fail;
 
+	if (URTWM_CHIP_IS_12A(sc)) {
+		urtwm_write_1(sc, R92C_RF_CTRL,
+		    R92C_RF_CTRL_EN |
+		    R92C_RF_CTRL_SDMRSTB);
+		urtwm_write_1(sc, R92C_RF_CTRL,
+		    R92C_RF_CTRL_EN |
+		    R92C_RF_CTRL_RSTB |
+		    R92C_RF_CTRL_SDMRSTB);
+		urtwm_write_1(sc, R88A_RF_B_CTRL,
+		    R92C_RF_CTRL_EN |
+		    R92C_RF_CTRL_SDMRSTB);
+		urtwm_write_1(sc, R88A_RF_B_CTRL,
+		    R92C_RF_CTRL_EN |
+		    R92C_RF_CTRL_RSTB |
+		    R92C_RF_CTRL_SDMRSTB);
+	}
+
 	/* Power on adapter. */
 	error = urtwm_power_on(sc);
 	if (error != 0)
@@ -5694,9 +5731,14 @@ urtwm_init(struct urtwm_softc *sc)
 
 	/* Setup USB aggregation. */
 	/* Tx aggregation. */
-	urtwm_setbits_4(sc, R92C_TDECTRL, R92C_TDECTRL_BLK_DESC_NUM_M, 6);
-	/* RTL8821AU specific. */
-	urtwm_write_1(sc, R88A_DWBCN1_CTRL, (6 << 1));
+	if (URTWM_CHIP_IS_12A(sc)) {
+		urtwm_setbits_4(sc, R92C_TDECTRL,
+		    R92C_TDECTRL_BLK_DESC_NUM_M, 3);
+	} else {
+		urtwm_setbits_4(sc, R92C_TDECTRL,
+		    R92C_TDECTRL_BLK_DESC_NUM_M, 6);
+		urtwm_write_1(sc, R88A_DWBCN1_CTRL, (6 << 1));
+	}
 
 	/* Rx aggregation (DMA). */
 	if (usbd_get_speed(sc->sc_udev) == USB_SPEED_SUPER)
@@ -5722,20 +5764,32 @@ urtwm_init(struct urtwm_softc *sc)
 	urtwm_write_1(sc, R92C_RXDMA_STATUS + 1, 0xf5);
 
 	/* Setup AMPDU aggregation. */
-	urtwm_write_1(sc, R88A_AMPDU_MAX_TIME, 0x5e);
+	if (URTWM_CHIP_IS_12A(sc))
+		urtwm_write_1(sc, R88A_AMPDU_MAX_TIME, 0x70);
+	else
+		urtwm_write_1(sc, R88A_AMPDU_MAX_TIME, 0x5e);
 	urtwm_write_4(sc, R88A_AMPDU_MAX_LENGTH, 0xffffffff);
 
 	/* 80 MHz clock (again?) */
 	urtwm_write_1(sc, R92C_USTIME_TSF, 0x50);
 	urtwm_write_1(sc, R92C_USTIME_EDCA, 0x50);
 
-	if ((urtwm_read_1(sc, R92C_USB_INFO) & 0x30) == 0) {
-		/* Set burst packet length to 512 B. */
-		urtwm_setbits_1(sc, R88A_RXDMA_PRO, 0x20, 0x10);
-		urtwm_write_2(sc, R88A_RXDMA_PRO, 0x1e);
-	} else {
-		/* Set burst packet length to 64 B. */
-		urtwm_setbits_1(sc, R88A_RXDMA_PRO, 0x10, 0x20);
+	if (URTWM_CHIP_IS_21A(sc) ||
+	    urtwm_read_1(sc, R92C_TYPE_ID + 3) & 0x80)	{
+		if ((urtwm_read_1(sc, R92C_USB_INFO) & 0x30) == 0) {
+			/* Set burst packet length to 512 B. */
+			urtwm_setbits_1(sc, R88A_RXDMA_PRO, 0x20, 0x10);
+			urtwm_write_2(sc, R88A_RXDMA_PRO, 0x1e);
+		} else {
+			/* Set burst packet length to 64 B. */
+			urtwm_setbits_1(sc, R88A_RXDMA_PRO, 0x10, 0x20);
+		}
+	} else {	/* USB 3.0 */
+		/* Set burst packet length to 1 KB. */
+		urtwm_setbits_1(sc, R88A_RXDMA_PRO, 0x30, 0);
+		urtwm_write_2(sc, R88A_RXDMA_PRO, 0x0e);
+
+		urtwm_setbits_1(sc, 0xf008, 0x18, 0);
 	}
 
 	/* Enable single packet AMPDU. */
@@ -5747,10 +5801,16 @@ urtwm_init(struct urtwm_softc *sc)
 
 	urtwm_write_1(sc, R92C_PIFS, 0);
 
-	urtwm_write_2(sc, R92C_MAX_AGGR_NUM, 0x0a0a);
-	urtwm_write_1(sc, R92C_FWHW_TXQ_CTRL,
-	    R92C_FWHW_TXQ_CTRL_AMPDU_RTY_NEW);
-	urtwm_write_4(sc, R92C_FAST_EDCA_CTRL, 0x03087777);
+	if (URTWM_CHIP_IS_12A(sc)) {
+		urtwm_write_1(sc, R92C_MAX_AGGR_NUM, 0x1f);
+		urtwm_setbits_1(sc, R92C_FWHW_TXQ_CTRL,
+		    R92C_FWHW_TXQ_CTRL_AMPDU_RTY_NEW, 0);
+	} else {
+		urtwm_write_2(sc, R92C_MAX_AGGR_NUM, 0x0a0a);
+		urtwm_write_1(sc, R92C_FWHW_TXQ_CTRL,
+		    R92C_FWHW_TXQ_CTRL_AMPDU_RTY_NEW);
+		urtwm_write_4(sc, R92C_FAST_EDCA_CTRL, 0x03087777);
+	}
 
 	/* Do not reset MAC. */
 	urtwm_setbits_1(sc, R92C_RSV_CTRL, 0, 0x60);
