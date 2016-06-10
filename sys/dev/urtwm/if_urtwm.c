@@ -2700,12 +2700,12 @@ urtwm_process_key(struct ieee80211vap *vap, const struct ieee80211_key *k,
 	if (&vap->iv_nw_keys[0] <= k &&
 	    k < &vap->iv_nw_keys[IEEE80211_WEP_NKID]) {
 		URTWM_LOCK(sc);		/* XXX */
+		uvp->keys[k->wk_keyix] = set ? k : NULL;
 		if ((sc->sc_flags & URTWM_RUNNING) == 0) {
 			/*
 			 * The device was not started;
 			 * the key will be installed later.
 			 */
-			uvp->keys[k->wk_keyix] = set ? k : NULL;
 			URTWM_UNLOCK(sc);
 			return (1);
 		}
