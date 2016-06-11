@@ -132,9 +132,10 @@ struct urtwm_softc {
 	uint32_t		sc_debug;
 	uint8_t			sc_iface_index;
 	uint8_t			sc_flags;
-#define URTWM_DETACHED	0x01
-#define URTWM_RUNNING	0x02
-#define URTWM_FW_LOADED	0x08
+#define URTWM_FLAG_CCK_HIPWR	0x01
+#define URTWM_DETACHED		0x02
+#define URTWM_RUNNING		0x04
+#define URTWM_FW_LOADED		0x08
 
 	uint8_t			chip;
 #define URTWM_CHIP_12A		0x01
@@ -225,6 +226,7 @@ struct urtwm_softc {
 	void		(*sc_parse_rom)(struct urtwm_softc *,
 			    struct r88a_rom *);
 	void		(*sc_set_led)(struct urtwm_softc *, int, int);
+	int8_t		(*sc_get_rssi_cck)(struct urtwm_softc *, void *);
 	int		(*sc_power_on)(struct urtwm_softc *);
 	void		(*sc_power_off)(struct urtwm_softc *);
 	void		(*sc_fw_reset)(struct urtwm_softc *);

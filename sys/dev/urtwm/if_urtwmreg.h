@@ -682,6 +682,7 @@
 /*
  * Baseband registers.
  */
+#define R88A_CCK_RPT_FORMAT		0x804
 #define R88A_OFDMCCK_EN			0x808
 #define R88A_RX_PATH			R88A_OFDMCCK_EN
 #define R88A_TX_PATH			0x80c
@@ -722,6 +723,9 @@
 #define R88A_RFE_INV(chain)		(0xcb4 + (chain) * 0x200)
 #define R88A_HSPI_READBACK(chain)	(0xd04 + (chain) * 0x40)
 #define R88A_LSSI_READBACK(chain)	(0xd08 + (chain) * 0x40)
+
+/* Bits for R88A_CCK_RPT_FORMAT. */
+#define R88A_CCK_RPT_FORMAT_HIPWR	0x00010000
 
 /* Bits for R88A_OFDMCCK_EN. */
 #define R88A_OFDMCCK_EN_CCK	0x10000000

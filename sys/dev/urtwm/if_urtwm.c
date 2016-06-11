@@ -286,7 +286,8 @@ static void		urtwm_calib_to(void *);
 static void		urtwm_calib_cb(struct urtwm_softc *,
 			    union sec_param *);
 #endif
-static int8_t		urtwm_get_rssi_cck(struct urtwm_softc *, void *);
+static int8_t		urtwm_r12a_get_rssi_cck(struct urtwm_softc *, void *);
+static int8_t		urtwm_r21a_get_rssi_cck(struct urtwm_softc *, void *);
 static int8_t		urtwm_get_rssi_ofdm(struct urtwm_softc *, void *);
 static int8_t		urtwm_get_rssi(struct urtwm_softc *, int, void *);
 static void		urtwm_tx_protection(struct urtwm_softc *,
@@ -404,6 +405,8 @@ static void		urtwm_delay(struct urtwm_softc *, int);
 	(((_sc)->sc_parse_rom)((_sc), (_rom)))
 #define urtwm_set_led(_sc, _led, _on) \
 	(((_sc)->sc_set_led)((_sc), (_led), (_on)))
+#define urtwm_get_rssi_cck(_sc, _physt) \
+	(((_sc)->sc_get_rssi_cck)((_sc), (_physt)))
 #define urtwm_power_on(_sc) \
 	(((_sc)->sc_power_on)((_sc)))
 #define urtwm_power_off(_sc) \
@@ -2110,6 +2113,7 @@ urtwm_config_specific(struct urtwm_softc *sc)
 			sc->sc_rf_read = urtwm_r12a_rf_read;
 		sc->sc_check_condition = urtwm_r12a_check_condition;
 		sc->sc_parse_rom = urtwm_r12a_parse_rom;
+		sc->sc_get_rssi_cck = urtwm_r12a_get_rssi_cck;
 		sc->sc_power_on = urtwm_r12a_power_on;
 		sc->sc_power_off = urtwm_r12a_power_off;
 		sc->sc_fw_reset = urtwm_r12a_fw_reset;
@@ -2141,6 +2145,7 @@ urtwm_config_specific(struct urtwm_softc *sc)
 		sc->sc_rf_read = urtwm_r21a_rf_read;
 		sc->sc_check_condition = urtwm_r21a_check_condition;
 		sc->sc_parse_rom = urtwm_r21a_parse_rom;
+		sc->sc_get_rssi_cck = urtwm_r21a_get_rssi_cck;
 		sc->sc_power_on = urtwm_r21a_power_on;
 		sc->sc_power_off = urtwm_r21a_power_off;
 		sc->sc_fw_reset = urtwm_r21a_fw_reset;
@@ -3174,7 +3179,54 @@ urtwn_calib_cb(struct urtwn_softc *sc, union sec_param *data)
 #endif	/* URTWM_TODO */
 
 static int8_t
-urtwm_get_rssi_cck(struct urtwm_softc *sc, void *physt)
+urtwm_r12a_get_rssi_cck(struct urtwm_softc *sc, void *physt)
+{
+	struct r88a_rx_phystat *stat = (struct r88a_rx_phystat *)physt;
+	int8_t lna_idx, vga_idx, pwdb;
+
+	lna_idx = (stat->cfosho[0] & 0xe0) >> 5;
+	vga_idx = (stat->cfosho[0] & 0x1f);
+	pwdb = 6 - 2 * vga_idx;
+
+	switch (lna_idx) {
+	case 7:
+		if (vga_idx > 27)
+			pwdb = -100 + 6;
+		else
+			pwdb += -100 + 2 * 27;
+		break;
+	case 6:
+		pwdb += -48 + 2 * 2;
+		break;
+	case 5:
+		pwdb += -42 + 2 * 7;
+		break;
+	case 4:
+		pwdb += -36 + 2 * 7;
+		break;
+	case 3:
+		pwdb += -24 + 2 * 7;
+		break;
+	case 2:
+		pwdb += -6 + 2 * 5;
+		if (sc->sc_flags & URTWM_FLAG_CCK_HIPWR)
+			pwdb -= 6;
+		break;
+	case 1:
+		pwdb += 8;
+		break;
+	case 0:
+		pwdb += 14;
+		break;
+	default:
+		break;
+	}
+
+	return (pwdb);		/* XXX PWDB -> RSSI conversion? */
+}
+
+static int8_t
+urtwm_r21a_get_rssi_cck(struct urtwm_softc *sc, void *physt)
 {
 	struct r88a_rx_phystat *stat = (struct r88a_rx_phystat *)physt;
 	int8_t lna_idx, pwdb;
@@ -4579,25 +4631,29 @@ urtwm_bb_init(struct urtwm_softc *sc)
 
 	urtwm_crystalcap_write(sc);
 
-	/* XXX cannot happen yet. */
-	if (URTWM_CHIP_IS_12A(sc) &&
-	    sc->ntxchains == 1 &&
-	    sc->nrxchains == 1) {
-		/* BB OFDM Rx path A. */
-		urtwm_bb_setbits(sc, R88A_RX_PATH, 0xff, 0x11);
-		/* BB OFDM Tx path A. */
-		urtwm_bb_setbits(sc, R88A_TX_PATH, 0xfffffff, 0x1111);
-		/* BB CCK R/Rx path A. */
-		urtwm_bb_setbits(sc, R88A_CCK_RX_PATH, 0x0c000000, 0);
-		/* MCS support. */
-		urtwm_bb_setbits(sc, 0x8bc, 0xc0000060, 0);
-		/* RF Path B HSSI off. */
-		urtwm_bb_setbits(sc, R88A_HSSI_PARAM1(1), 0x0f, 0x04);
-		/* RF Path B power down. */
-		urtwm_bb_write(sc, R88A_LSSI_PARAM(1), 0);
-		/* ADDA Path B off. */
-		urtwm_bb_write(sc, R88A_AFE_POWER_1(1), 0);
-		urtwm_bb_write(sc, R88A_AFE_POWER_2(1), 0);
+	if (URTWM_CHIP_IS_12A(sc)) {
+		/* XXX cannot happen yet. */
+		if (sc->ntxchains == 1 && sc->nrxchains == 1) {
+			/* BB OFDM Rx path A. */
+			urtwm_bb_setbits(sc, R88A_RX_PATH, 0xff, 0x11);
+			/* BB OFDM Tx path A. */
+			urtwm_bb_setbits(sc, R88A_TX_PATH, 0xfffffff, 0x1111);
+			/* BB CCK R/Rx path A. */
+			urtwm_bb_setbits(sc, R88A_CCK_RX_PATH, 0x0c000000, 0);
+			/* MCS support. */
+			urtwm_bb_setbits(sc, 0x8bc, 0xc0000060, 0);
+			/* RF Path B HSSI off. */
+			urtwm_bb_setbits(sc, R88A_HSSI_PARAM1(1), 0x0f, 0x04);
+			/* RF Path B power down. */
+			urtwm_bb_write(sc, R88A_LSSI_PARAM(1), 0);
+			/* ADDA Path B off. */
+			urtwm_bb_write(sc, R88A_AFE_POWER_1(1), 0);
+			urtwm_bb_write(sc, R88A_AFE_POWER_2(1), 0);
+		}
+
+		if (urtwm_bb_read(sc, R88A_CCK_RPT_FORMAT) &
+		    R88A_CCK_RPT_FORMAT_HIPWR)
+			sc->sc_flags |= URTWM_FLAG_CCK_HIPWR;
 	}
 }
 
