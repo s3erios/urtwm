@@ -3176,44 +3176,44 @@ urtwn_calib_cb(struct urtwn_softc *sc, union sec_param *data)
 static int8_t
 urtwm_get_rssi_cck(struct urtwm_softc *sc, void *physt)
 {
-	/* XXX the structure a bit wrong */
-	struct r88e_rx_cck *cck = (struct r88e_rx_cck *)physt;
-	int8_t lna_idx, rssi;
+	struct r88a_rx_phystat *stat = (struct r88a_rx_phystat *)physt;
+	int8_t lna_idx, pwdb;
 
-	lna_idx = (cck->agc_rpt & 0xe0) >> 5;
-	rssi = -6 - 2*(cck->agc_rpt & 0x1f);	/* Pout - (2 * VGA_idx) */
+	lna_idx = (stat->cfosho[0] & 0xe0) >> 5;
+	pwdb = -6 - 2*(stat->cfosho[0] & 0x1f);	/* Pout - (2 * VGA_idx) */
 
 	switch (lna_idx) {
 	case 5:
-		rssi -= 32;
+		pwdb -= 32;
 		break;
 	case 4:
-		rssi -= 24;
+		pwdb -= 24;
 		break;
 	case 2:
-		rssi -= 11;
+		pwdb -= 11;
 		break;
 	case 1:
-		rssi += 5;
+		pwdb += 5;
 		break;
 	case 0:
-		rssi += 21;
+		pwdb += 21;
 		break;
 	}
 
-	return (rssi);
+	return (pwdb);		/* XXX PWDB -> RSSI conversion? */
 }
 
 static int8_t
 urtwm_get_rssi_ofdm(struct urtwm_softc *sc, void *physt)
 {
-	/* XXX reuse path_agc from r88e_rx_cck here */
-	struct r92c_rx_phystat *phy = (struct r92c_rx_phystat *)physt;
-	int8_t rssi;
+	struct r88a_rx_phystat *stat = (struct r88a_rx_phystat *)physt;
+	int i, rssi;
 
-	rssi = ((le32toh(phy->phydw1) >> 1) & 0x7f) - 110;
+	rssi = 0;
+	for (i = 0; i < sc->nrxchains; i++)
+		rssi += (stat->gain_trsw[i] & 0x7f) - 110;
 
-	return (rssi);
+	return (rssi / sc->nrxchains);
 }
 
 static int8_t
@@ -6021,8 +6021,7 @@ urtwm_init(struct urtwm_softc *sc)
 	    R92C_TXDMA_OFFSET_DROP_DATA_EN);
 
 	/* Set info size in Rx descriptors (in 64-bit words). */
-	/* XXX optimize? */
-	urtwm_write_1(sc, R92C_RX_DRVINFO_SZ, 4);
+	urtwm_write_1(sc, R92C_RX_DRVINFO_SZ, R92C_RX_DRVINFO_SZ_DEF);
 
 	/* Init interrupts. */
 	urtwm_write_4(sc, R88E_HIMR, 0);

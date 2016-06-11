@@ -654,6 +654,9 @@
 #define R92C_RCR_APP_MIC	0x40000000
 #define R92C_RCR_APPFCS		0x80000000
 
+/* Bits for R92C_RX_DRVINFO_SZ. */
+#define R92C_RX_DRVINFO_SZ_DEF	4	/* XXX other values will not work */
+
 /* Bits for R92C_CAMCMD. */
 #define R92C_CAMCMD_ADDR_M	0x0000ffff
 #define R92C_CAMCMD_ADDR_S	0
@@ -1217,43 +1220,42 @@ struct r92c_rx_stat {
 } __packed __attribute__((aligned(4)));
 
 /* Rx PHY descriptor. */
-struct r92c_rx_phystat {
-	uint32_t	phydw0;
-	uint32_t	phydw1;
-	uint32_t	phydw2;
-	uint32_t	phydw3;
-	uint32_t	phydw4;
-	uint32_t	phydw5;
-	uint32_t	phydw6;
-	uint32_t	phydw7;
-} __packed __attribute__((aligned(4)));
-
-/* Rx PHY CCK descriptor. */
-struct r92c_rx_cck {
-	uint8_t		adc_pwdb[4];
-	uint8_t		sq_rpt;
-	uint8_t		agc_rpt;
+#ifdef R92C_RX_DRVINFO_SZ_DEF
+struct r88a_rx_phystat {
+#if R92C_RX_DRVINFO_SZ_DEF > 0
+	uint8_t		gain_trsw[2];
+	uint16_t	phyw1;
+#define R88A_PHYW1_CHAN_M	0x03ff
+#define R88A_PHYW1_CHAN_S	0
+#define R88A_PHYW1_CHAN_EXT_M	0x3c00
+#define R88A_PHYW1_CHAN_EXT_S	10
+#define R88A_PHYW1_RFMOD_M	0xc000
+#define R88A_PHYW1_RFMOD_S	14
+	uint8_t		pwdb_all;
+	uint8_t		cfosho[4];
+#endif
+#if R92C_RX_DRVINFO_SZ_DEF > 1
+	uint8_t		cfotail[4];
+	uint8_t		rxevm[2];
+	uint8_t		rxsnr[2];
+#endif
+#if R92C_RX_DRVINFO_SZ_DEF > 2
+	uint8_t		pcts_msk_rpt[2];
+	uint8_t		pdsnr[2];
+	uint8_t		csi_current[2];
+	uint8_t		rx_gain_c;
+#endif
+#if R92C_RX_DRVINFO_SZ_DEF > 3
+	uint8_t		rx_gain_d;
+	uint8_t		sigevm;
+	uint16_t	phyw13;
+#define R88A_PHYW13_ANTIDX_A_M	0x0700
+#define R88A_PHYW13_ANTIDX_A_S	8
+#define R88A_PHYW13_ANTIDX_B_M	0x3800
+#define R88A_PHYW13_ANTIDX_B_S	11
+#endif
 } __packed;
-
-struct r88e_rx_cck {
-	uint8_t		path_agc[2];
-	uint8_t		chan;
-	uint8_t		reserved1;
-	uint8_t		sig_qual;
-	uint8_t		agc_rpt;
-	uint8_t		rpt_b;
-	uint8_t 	reserved2;
-	uint8_t		noise_power;
-	uint8_t		path_cfotail[2];        
-	uint8_t		pcts_mask[2];   
-	uint8_t		stream_rxevm[2];        
-	uint8_t		path_rxsnr[2];
-	uint8_t		noise_power_db_lsb;
-	uint8_t		reserved3[3];
-	uint8_t		stream_csi[2];
-	uint8_t		stream_target_csi[2];
-	uint8_t		sig_evm;
-} __packed;
+#endif
 
 /* C2H event types. */
 #define R88A_C2H_DEBUG		0x00
