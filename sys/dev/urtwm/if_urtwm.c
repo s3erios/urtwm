@@ -1358,8 +1358,10 @@ static void
 urtwm_bulk_tx_callback(struct usb_xfer *xfer, usb_error_t error)
 {
 	struct urtwm_softc *sc = usbd_xfer_softc(xfer);
+#ifdef URTWM_TODO
 #ifdef	IEEE80211_SUPPORT_SUPERG
 	struct ieee80211com *ic = &sc->sc_ic;
+#endif
 #endif
 	struct urtwm_data *data;
 
