@@ -236,11 +236,11 @@ static void		urtwm_config_specific(struct urtwm_softc *);
 static void		urtwm_config_specific_rom(struct urtwm_softc *);
 static int		urtwm_read_rom(struct urtwm_softc *);
 static void		urtwm_r12a_parse_rom(struct urtwm_softc *,
-			    struct r88a_rom *);
+			    struct r12a_rom *);
 static void		urtwm_r21a_parse_rom(struct urtwm_softc *,
-			    struct r88a_rom *);
+			    struct r12a_rom *);
 static void		urtwm_parse_rom(struct urtwm_softc *,
-			    struct r88a_rom *);
+			    struct r12a_rom *);
 #ifdef URTWM_TODO
 static int		urtwm_ra_init(struct urtwm_softc *);
 #endif
@@ -291,9 +291,9 @@ static int8_t		urtwm_r21a_get_rssi_cck(struct urtwm_softc *, void *);
 static int8_t		urtwm_get_rssi_ofdm(struct urtwm_softc *, void *);
 static int8_t		urtwm_get_rssi(struct urtwm_softc *, int, void *);
 static void		urtwm_tx_protection(struct urtwm_softc *,
-			    struct r88a_tx_desc *, enum ieee80211_protmode);
+			    struct r12a_tx_desc *, enum ieee80211_protmode);
 static void		urtwm_tx_raid(struct urtwm_softc *,
-			    struct r88a_tx_desc *, struct ieee80211_node *,
+			    struct r12a_tx_desc *, struct ieee80211_node *,
 			    int);
 static int		urtwm_tx_data(struct urtwm_softc *,
 			    struct ieee80211_node *, struct mbuf *,
@@ -304,7 +304,7 @@ static int		urtwm_tx_raw(struct urtwm_softc *,
 			    const struct ieee80211_bpf_params *);
 static void		urtwm_tx_start(struct urtwm_softc *, struct mbuf *,
 			    uint8_t, struct urtwm_data *);
-static void		urtwm_tx_checksum(struct r88a_tx_desc *);
+static void		urtwm_tx_checksum(struct r12a_tx_desc *);
 static int		urtwm_transmit(struct ieee80211com *, struct mbuf *);
 static void		urtwm_start(struct urtwm_softc *);
 static void		urtwm_parent(struct ieee80211com *);
@@ -929,7 +929,7 @@ urtwm_report_intr(struct urtwm_softc *sc, struct usb_xfer *xfer,
 	rxdw2 = le32toh(stat->rxdw2);
 
 	/* XXX FF flushing? */
-	if (rxdw2 & R88A_RXDW2_RPT_C2H)
+	if (rxdw2 & R12A_RXDW2_RPT_C2H)
 		urtwm_c2h_report(sc, (uint8_t *)&stat[1], len - sizeof(*stat));
 	else
 		return (urtwm_rxeof(sc, buf, len));
@@ -949,10 +949,10 @@ urtwm_c2h_report(struct urtwm_softc *sc, uint8_t *buf, int len)
 	len -= 2;
 
 	switch (buf[0]) {	/* command id */
-	case R88A_C2H_TX_REPORT:
+	case R12A_C2H_TX_REPORT:
 		urtwm_ratectl_tx_complete(sc, &buf[2], len);
 		break;
-	case R88A_C2H_IQK_FINISHED:
+	case R12A_C2H_IQK_FINISHED:
 		/* TODO */
 	default:
 		device_printf(sc->sc_dev,
@@ -964,7 +964,7 @@ urtwm_c2h_report(struct urtwm_softc *sc, uint8_t *buf, int len)
 static void
 urtwm_ratectl_tx_complete(struct urtwm_softc *sc, void *buf, int len)
 {
-	struct r88a_c2h_tx_rpt *rpt = buf;
+	struct r12a_c2h_tx_rpt *rpt = buf;
 	struct ieee80211vap *vap;
 	struct ieee80211_node *ni;
 	int ntries;
@@ -976,14 +976,14 @@ urtwm_ratectl_tx_complete(struct urtwm_softc *sc, void *buf, int len)
 		return;
 	}
 
-	if (rpt->macid > R8821A_MACID_MAX) {
+	if (rpt->macid > R21A_MACID_MAX) {
 		device_printf(sc->sc_dev,
 		    "macid %u is too big; increase MACID_MAX limit\n",
 		    rpt->macid);
 		return;
 	}
 
-	ntries = MS(rpt->txrptb2, R88A_TXRPTB2_RETRY_CNT);
+	ntries = MS(rpt->txrptb2, R12A_TXRPTB2_RETRY_CNT);
 
 	URTWM_NT_LOCK(sc);
 	ni = sc->node_list[rpt->macid];
@@ -991,10 +991,10 @@ urtwm_ratectl_tx_complete(struct urtwm_softc *sc, void *buf, int len)
 		vap = ni->ni_vap;
 		URTWM_DPRINTF(sc, URTWM_DEBUG_INTR, "%s: frame for macid %d was"
 		    "%s sent (%d retries)\n", __func__, rpt->macid,
-		    (rpt->txrptb0 & (R88A_TXRPTB0_RETRY_OVER |
-		    R88A_TXRPTB0_LIFE_EXPIRE)) ? " not" : "", ntries);
+		    (rpt->txrptb0 & (R12A_TXRPTB0_RETRY_OVER |
+		    R12A_TXRPTB0_LIFE_EXPIRE)) ? " not" : "", ntries);
 
-		if (rpt->txrptb0 & R88A_TXRPTB0_RETRY_OVER) {
+		if (rpt->txrptb0 & R12A_TXRPTB0_RETRY_OVER) {
 			ieee80211_ratectl_tx_complete(vap, ni,
 			    IEEE80211_RATECTL_TX_FAILURE, &ntries, NULL);
 		} else {
@@ -1686,7 +1686,7 @@ static void
 urtwm_rf_write(struct urtwm_softc *sc, int chain, uint8_t addr,
     uint32_t val)
 {
-	urtwm_bb_write(sc, R88A_LSSI_PARAM(chain),
+	urtwm_bb_write(sc, R12A_LSSI_PARAM(chain),
 	    SM(R88E_LSSI_PARAM_ADDR, addr) |
 	    SM(R92C_LSSI_PARAM_DATA, val));
 }
@@ -1698,20 +1698,20 @@ urtwm_r12a_rf_read(struct urtwm_softc *sc, int chain, uint8_t addr)
 
 	/* Turn off CCA (avoids reading the wrong value). */
 	if (addr != R92C_RF_AC)
-		urtwm_bb_setbits(sc, R88A_CCA_ON_SEC, 0, 0x08);
+		urtwm_bb_setbits(sc, R12A_CCA_ON_SEC, 0, 0x08);
 
-	val = urtwm_bb_read(sc, R88A_HSSI_PARAM1(chain));
-	pi_mode = (val & R88A_HSSI_PARAM1_PI) ? 1 : 0;
+	val = urtwm_bb_read(sc, R12A_HSSI_PARAM1(chain));
+	pi_mode = (val & R12A_HSSI_PARAM1_PI) ? 1 : 0;
 
-	urtwm_bb_setbits(sc, R88A_HSSI_PARAM2,
-	    R88A_HSSI_PARAM2_READ_ADDR_MASK, addr);
+	urtwm_bb_setbits(sc, R12A_HSSI_PARAM2,
+	    R12A_HSSI_PARAM2_READ_ADDR_MASK, addr);
 
-	val = urtwm_bb_read(sc, pi_mode ? R88A_HSPI_READBACK(chain) :
-	    R88A_LSSI_READBACK(chain));
+	val = urtwm_bb_read(sc, pi_mode ? R12A_HSPI_READBACK(chain) :
+	    R12A_LSSI_READBACK(chain));
 
 	/* Turn on CCA (when exiting). */
 	if (addr != R92C_RF_AC)
-		urtwm_bb_setbits(sc, R88A_CCA_ON_SEC, 0x08, 0);
+		urtwm_bb_setbits(sc, R12A_CCA_ON_SEC, 0x08, 0);
 
 	return (MS(val, R92C_LSSI_READBACK_DATA));
 }
@@ -1721,15 +1721,15 @@ urtwm_r21a_rf_read(struct urtwm_softc *sc, int chain, uint8_t addr)
 {
 	uint32_t pi_mode, val;
 
-	val = urtwm_bb_read(sc, R88A_HSSI_PARAM1(chain));
-	pi_mode = (val & R88A_HSSI_PARAM1_PI) ? 1 : 0;
+	val = urtwm_bb_read(sc, R12A_HSSI_PARAM1(chain));
+	pi_mode = (val & R12A_HSSI_PARAM1_PI) ? 1 : 0;
 
-	urtwm_bb_setbits(sc, R88A_HSSI_PARAM2,
-	    R88A_HSSI_PARAM2_READ_ADDR_MASK, addr);
+	urtwm_bb_setbits(sc, R12A_HSSI_PARAM2,
+	    R12A_HSSI_PARAM2_READ_ADDR_MASK, addr);
 	urtwm_delay(sc, 20);
 
-	val = urtwm_bb_read(sc, pi_mode ? R88A_HSPI_READBACK(chain) :
-	    R88A_LSSI_READBACK(chain));
+	val = urtwm_bb_read(sc, pi_mode ? R12A_HSPI_READBACK(chain) :
+	    R12A_LSSI_READBACK(chain));
 
 	return (MS(val, R92C_LSSI_READBACK_DATA));
 }
@@ -1935,7 +1935,7 @@ static int
 urtwm_setup_endpoints(struct urtwm_softc *sc)
 {
 	struct usb_endpoint *ep, *ep_end;
-	uint8_t addr[R88A_MAX_EPOUT];
+	uint8_t addr[R12A_MAX_EPOUT];
 	int error;
 
 	/* Determine the number of bulk-out pipes. */
@@ -1957,13 +1957,13 @@ urtwm_setup_endpoints(struct urtwm_softc *sc)
 		    "output" : "input");
 
 		if (UE_GET_DIR(eaddr) == UE_DIR_OUT) {
-			if (sc->ntx == R88A_MAX_EPOUT)
+			if (sc->ntx == R12A_MAX_EPOUT)
 				break;
 
 			addr[sc->ntx++] = UE_GET_ADDR(eaddr);
 		}
 	}
-	if (sc->ntx == 0 || sc->ntx > R88A_MAX_EPOUT) {
+	if (sc->ntx == 0 || sc->ntx > R12A_MAX_EPOUT) {
 		device_printf(sc->sc_dev,
 		    "%s: invalid number of Tx bulk pipes (%d)\n", __func__,
 		    sc->ntx);
@@ -2039,23 +2039,23 @@ urtwm_r12a_check_condition(struct urtwm_softc *sc, const uint8_t cond[])
 
 	nmasks = 0;
 	if (sc->ext_pa_2g) {
-		mask[nmasks] = R8812A_COND_GPA;
-		mask[nmasks] |= R8812A_COND_TYPE(sc->type_pa_2g);
+		mask[nmasks] = R12A_COND_GPA;
+		mask[nmasks] |= R12A_COND_TYPE(sc->type_pa_2g);
 		nmasks++;
 	}
 	if (sc->ext_pa_5g) {
-		mask[nmasks] = R8812A_COND_APA;
-		mask[nmasks] |= R8812A_COND_TYPE(sc->type_pa_5g);
+		mask[nmasks] = R12A_COND_APA;
+		mask[nmasks] |= R12A_COND_TYPE(sc->type_pa_5g);
 		nmasks++;
 	}
 	if (sc->ext_lna_2g) {
-		mask[nmasks] = R8812A_COND_GLNA;
-		mask[nmasks] |= R8812A_COND_TYPE(sc->type_lna_2g);
+		mask[nmasks] = R12A_COND_GLNA;
+		mask[nmasks] |= R12A_COND_TYPE(sc->type_lna_2g);
 		nmasks++;
 	}
 	if (sc->ext_lna_5g) {
-		mask[nmasks] = R8812A_COND_ALNA;
-		mask[nmasks] |= R8812A_COND_TYPE(sc->type_lna_5g);
+		mask[nmasks] = R12A_COND_ALNA;
+		mask[nmasks] |= R12A_COND_TYPE(sc->type_lna_5g);
 		nmasks++;
 	}
 
@@ -2082,12 +2082,12 @@ urtwm_r21a_check_condition(struct urtwm_softc *sc, const uint8_t cond[])
 
 	mask = 0;
 	if (sc->ext_pa_5g)
-		mask |= R8821A_COND_EXT_PA_5G;
+		mask |= R21A_COND_EXT_PA_5G;
 	if (sc->ext_lna_5g)
-		mask |= R8821A_COND_EXT_LNA_5G;
+		mask |= R21A_COND_EXT_LNA_5G;
 	if (!sc->ext_pa_2g && !sc->ext_lna_2g &&
 	    !sc->ext_pa_5g && !sc->ext_lna_5g)
-		mask = R8821A_COND_BOARD_DEF;
+		mask = R21A_COND_BOARD_DEF;
 
 	/* XXX BT? */
 	/* XXX board type? */
@@ -2133,11 +2133,11 @@ urtwm_config_specific(struct urtwm_softc *sc)
 		sc->fwname = "urtwm-rtl8812aufw";
 		sc->fwsig = 0x950;
 
-		sc->page_count = R8812A_TX_PAGE_COUNT;
-		sc->pktbuf_count = R88A_TXPKTBUF_COUNT;
-		sc->tx_boundary = R8812A_TX_PAGE_BOUNDARY;
-		sc->npubqpages = R88A_PUBQ_NPAGES;
-		sc->rx_dma_size = R88A_RX_DMA_BUFFER_SIZE;
+		sc->page_count = R12A_TX_PAGE_COUNT;
+		sc->pktbuf_count = R12A_TXPKTBUF_COUNT;
+		sc->tx_boundary = R12A_TX_PAGE_BOUNDARY;
+		sc->npubqpages = R12A_PUBQ_NPAGES;
+		sc->rx_dma_size = R12A_RX_DMA_BUFFER_SIZE;
 
 		sc->ntxchains = 2;
 		sc->nrxchains = 2;
@@ -2165,11 +2165,11 @@ urtwm_config_specific(struct urtwm_softc *sc)
 		sc->fwname = "urtwm-rtl8821aufw";
 		sc->fwsig = 0x210;
 
-		sc->page_count = R8821A_TX_PAGE_COUNT;
-		sc->pktbuf_count = R88A_TXPKTBUF_COUNT;
-		sc->tx_boundary = R8821A_TX_PAGE_BOUNDARY;
-		sc->npubqpages = R88A_PUBQ_NPAGES;
-		sc->rx_dma_size = R88A_RX_DMA_BUFFER_SIZE;
+		sc->page_count = R21A_TX_PAGE_COUNT;
+		sc->pktbuf_count = R12A_TXPKTBUF_COUNT;
+		sc->tx_boundary = R21A_TX_PAGE_BOUNDARY;
+		sc->npubqpages = R12A_PUBQ_NPAGES;
+		sc->rx_dma_size = R12A_RX_DMA_BUFFER_SIZE;
 
 		sc->ntxchains = 1;
 		sc->nrxchains = 1;
@@ -2199,7 +2199,7 @@ urtwm_config_specific_rom(struct urtwm_softc *sc)
 static int
 urtwm_read_rom(struct urtwm_softc *sc)
 {
-	struct r88a_rom *rom;
+	struct r12a_rom *rom;
 	int error;
 
 	rom = malloc(URTWM_EFUSE_MAX_LEN, M_TEMP, M_WAITOK);
@@ -2221,7 +2221,7 @@ fail:
 }
 
 static void
-urtwm_r12a_parse_rom(struct urtwm_softc *sc, struct r88a_rom *rom)
+urtwm_r12a_parse_rom(struct urtwm_softc *sc, struct r12a_rom *rom)
 {
 #define URTWM_GET_ROM_VAR(var, def)	(((var) != 0xff) ? (var) : (def))
 #define URTWM_SIGN4TO8(val)		(((val) & 0x08) ? (val) | 0xf0 : (val))
@@ -2232,30 +2232,30 @@ urtwm_r12a_parse_rom(struct urtwm_softc *sc, struct r88a_rom *rom)
 	lna_type_2g = URTWM_GET_ROM_VAR(rom->lna_type_2g, 0);
 	lna_type_5g = URTWM_GET_ROM_VAR(rom->lna_type_5g, 0);
 
-	sc->ext_pa_2g = R8812A_ROM_IS_PA_EXT_2GHZ(pa_type);
-	sc->ext_pa_5g = R8812A_ROM_IS_PA_EXT_5GHZ(pa_type);
-	sc->ext_lna_2g = R8821A_ROM_IS_LNA_EXT(lna_type_2g);
-	sc->ext_lna_5g = R8821A_ROM_IS_LNA_EXT(lna_type_5g);
+	sc->ext_pa_2g = R12A_ROM_IS_PA_EXT_2GHZ(pa_type);
+	sc->ext_pa_5g = R12A_ROM_IS_PA_EXT_5GHZ(pa_type);
+	sc->ext_lna_2g = R21A_ROM_IS_LNA_EXT(lna_type_2g);
+	sc->ext_lna_5g = R21A_ROM_IS_LNA_EXT(lna_type_5g);
 
 	if (sc->ext_pa_2g) {
 		sc->type_pa_2g =
-		    R8812A_GET_ROM_PA_TYPE(lna_type_2g, 0) |
-		    (R8812A_GET_ROM_PA_TYPE(lna_type_2g, 1) << 2);
+		    R12A_GET_ROM_PA_TYPE(lna_type_2g, 0) |
+		    (R12A_GET_ROM_PA_TYPE(lna_type_2g, 1) << 2);
 	}
 	if (sc->ext_pa_5g) {
 		sc->type_pa_5g =
-		    R8812A_GET_ROM_PA_TYPE(lna_type_5g, 0) |
-		    (R8812A_GET_ROM_PA_TYPE(lna_type_5g, 1) << 2);
+		    R12A_GET_ROM_PA_TYPE(lna_type_5g, 0) |
+		    (R12A_GET_ROM_PA_TYPE(lna_type_5g, 1) << 2);
 	}
 	if (sc->ext_lna_2g) {
 		sc->type_lna_2g =
-		    R8812A_GET_ROM_LNA_TYPE(lna_type_2g, 0) |
-		    (R8812A_GET_ROM_LNA_TYPE(lna_type_2g, 1) << 2);
+		    R12A_GET_ROM_LNA_TYPE(lna_type_2g, 0) |
+		    (R12A_GET_ROM_LNA_TYPE(lna_type_2g, 1) << 2);
 	}
 	if (sc->ext_lna_5g) {
 		sc->type_lna_5g =
-		    R8812A_GET_ROM_LNA_TYPE(lna_type_5g, 0) |
-		    (R8812A_GET_ROM_LNA_TYPE(lna_type_5g, 1) << 2);
+		    R12A_GET_ROM_LNA_TYPE(lna_type_5g, 0) |
+		    (R12A_GET_ROM_LNA_TYPE(lna_type_5g, 1) << 2);
 	}
 
 	if (rom->rfe_option & 0x80) {
@@ -2284,7 +2284,7 @@ urtwm_r12a_parse_rom(struct urtwm_softc *sc, struct r88a_rom *rom)
 }
 
 static void
-urtwm_r21a_parse_rom(struct urtwm_softc *sc, struct r88a_rom *rom)
+urtwm_r21a_parse_rom(struct urtwm_softc *sc, struct r12a_rom *rom)
 {
 	uint8_t pa_type, lna_type_2g, lna_type_5g;
 
@@ -2293,31 +2293,31 @@ urtwm_r21a_parse_rom(struct urtwm_softc *sc, struct r88a_rom *rom)
 	lna_type_2g = URTWM_GET_ROM_VAR(rom->lna_type_2g, 0);
 	lna_type_5g = URTWM_GET_ROM_VAR(rom->lna_type_5g, 0);
 
-	sc->ext_pa_2g = R8821A_ROM_IS_PA_EXT_2GHZ(pa_type);
-	sc->ext_pa_5g = R8821A_ROM_IS_PA_EXT_5GHZ(pa_type);
-	sc->ext_lna_2g = R8821A_ROM_IS_LNA_EXT(lna_type_2g);
-	sc->ext_lna_5g = R8821A_ROM_IS_LNA_EXT(lna_type_5g);
+	sc->ext_pa_2g = R21A_ROM_IS_PA_EXT_2GHZ(pa_type);
+	sc->ext_pa_5g = R21A_ROM_IS_PA_EXT_5GHZ(pa_type);
+	sc->ext_lna_2g = R21A_ROM_IS_LNA_EXT(lna_type_2g);
+	sc->ext_lna_5g = R21A_ROM_IS_LNA_EXT(lna_type_5g);
 
 	/* Read MAC address. */
 	IEEE80211_ADDR_COPY(sc->sc_ic.ic_macaddr, rom->macaddr_21a);
 }
 
 static void
-urtwm_parse_rom(struct urtwm_softc *sc, struct r88a_rom *rom)
+urtwm_parse_rom(struct urtwm_softc *sc, struct r12a_rom *rom)
 {
 	int i, j;
 
 	sc->crystalcap = URTWM_GET_ROM_VAR(rom->crystalcap,
-	    R88A_ROM_CRYSTALCAP_DEF);
+	    R12A_ROM_CRYSTALCAP_DEF);
 	sc->tx_bbswing_2g = URTWM_GET_ROM_VAR(rom->tx_bbswing_2g, 0);
 	sc->tx_bbswing_5g = URTWM_GET_ROM_VAR(rom->tx_bbswing_5g, 0);
 
 	for (i = 0; i < sc->ntxchains; i++) {
-		struct r88a_tx_pwr_2g *pwr_2g = &rom->tx_pwr[i].pwr_2g;
-		struct r88a_tx_pwr_5g *pwr_5g = &rom->tx_pwr[i].pwr_5g;
-		struct r88a_tx_pwr_diff_2g *pwr_diff_2g =
+		struct r12a_tx_pwr_2g *pwr_2g = &rom->tx_pwr[i].pwr_2g;
+		struct r12a_tx_pwr_5g *pwr_5g = &rom->tx_pwr[i].pwr_5g;
+		struct r12a_tx_pwr_diff_2g *pwr_diff_2g =
 		    &rom->tx_pwr[i].pwr_diff_2g;
-		struct r88a_tx_pwr_diff_5g *pwr_diff_5g =
+		struct r12a_tx_pwr_diff_5g *pwr_diff_5g =
 		    &rom->tx_pwr[i].pwr_diff_5g;
 
 		for (j = 0; j < URTWM_MAX_GROUP_2G - 1; j++) {
@@ -2543,21 +2543,21 @@ urtwn_ra_init(struct urtwm_softc *sc)
 static void
 urtwm_init_beacon(struct urtwm_softc *sc, struct urtwm_vap *uvp)
 {
-	struct r88a_tx_desc *txd = &uvp->bcn_desc;
+	struct r12a_tx_desc *txd = &uvp->bcn_desc;
 
 	txd->offset = sizeof(*txd);
-	txd->flags0 = R88A_FLAGS0_LSG | R88A_FLAGS0_FSG | R88A_FLAGS0_OWN |
-	    R88A_FLAGS0_BMCAST;
+	txd->flags0 = R12A_FLAGS0_LSG | R12A_FLAGS0_FSG | R12A_FLAGS0_OWN |
+	    R12A_FLAGS0_BMCAST;
 
 	/*
 	 * NB: there is no need to setup HWSEQ_EN bit;
 	 * QSEL_BEACON already implies it.
 	 */
-	txd->txdw1 = htole32(SM(R88A_TXDW1_QSEL, R88A_TXDW1_QSEL_BEACON));
-	txd->txdw1 |= htole32(SM(R88A_TXDW1_MACID, URTWM_MACID_BC));
+	txd->txdw1 = htole32(SM(R12A_TXDW1_QSEL, R12A_TXDW1_QSEL_BEACON));
+	txd->txdw1 |= htole32(SM(R12A_TXDW1_MACID, URTWM_MACID_BC));
 
-	txd->txdw3 = htole32(R88A_TXDW3_DRVRATE);
-	txd->txdw4 = htole32(SM(R88A_TXDW4_DATARATE, URTWM_RIDX_CCK1));
+	txd->txdw3 = htole32(R12A_TXDW3_DRVRATE);
+	txd->txdw4 = htole32(SM(R12A_TXDW4_DATARATE, URTWM_RIDX_CCK1));
 }
 
 static int
@@ -2634,7 +2634,7 @@ urtwm_update_beacon(struct ieee80211vap *vap, int item)
 static int
 urtwm_tx_beacon(struct urtwm_softc *sc, struct urtwm_vap *uvp)
 {
-	struct r88a_tx_desc *desc = &uvp->bcn_desc;
+	struct r12a_tx_desc *desc = &uvp->bcn_desc;
 	struct urtwm_data *bf;
 
 	URTWM_ASSERT_LOCKED(sc);
@@ -2943,7 +2943,7 @@ urtwm_r12a_set_led(struct urtwm_softc *sc, int led, int on)
 
 	if (led == URTWM_LED_LINK) {
 		urtwm_setbits_1(sc, R92C_LEDCFG0, 0x8f,
-		    R88A_LEDCFG2_ENA | (on ? 0 : R92C_LEDCFG0_DIS));
+		    R12A_LEDCFG2_ENA | (on ? 0 : R92C_LEDCFG0_DIS));
 		sc->ledlink = on;	/* Save LED state. */
 	}
 
@@ -2955,7 +2955,7 @@ urtwm_r21a_set_led(struct urtwm_softc *sc, int led, int on)
 {
 	if (led == URTWM_LED_LINK) {
 		urtwm_write_1(sc, R92C_LEDCFG2,
-		    R88A_LEDCFG2_ENA | (on ? 0 : R92C_LEDCFG0_DIS));
+		    R12A_LEDCFG2_ENA | (on ? 0 : R92C_LEDCFG0_DIS));
 		sc->ledlink = on;	/* Save LED state. */
 	}
 }
@@ -3181,7 +3181,7 @@ urtwn_calib_cb(struct urtwn_softc *sc, union sec_param *data)
 static int8_t
 urtwm_r12a_get_rssi_cck(struct urtwm_softc *sc, void *physt)
 {
-	struct r88a_rx_phystat *stat = (struct r88a_rx_phystat *)physt;
+	struct r12a_rx_phystat *stat = (struct r12a_rx_phystat *)physt;
 	int8_t lna_idx, vga_idx, pwdb;
 
 	lna_idx = (stat->cfosho[0] & 0xe0) >> 5;
@@ -3228,7 +3228,7 @@ urtwm_r12a_get_rssi_cck(struct urtwm_softc *sc, void *physt)
 static int8_t
 urtwm_r21a_get_rssi_cck(struct urtwm_softc *sc, void *physt)
 {
-	struct r88a_rx_phystat *stat = (struct r88a_rx_phystat *)physt;
+	struct r12a_rx_phystat *stat = (struct r12a_rx_phystat *)physt;
 	int8_t lna_idx, pwdb;
 
 	lna_idx = (stat->cfosho[0] & 0xe0) >> 5;
@@ -3258,7 +3258,7 @@ urtwm_r21a_get_rssi_cck(struct urtwm_softc *sc, void *physt)
 static int8_t
 urtwm_get_rssi_ofdm(struct urtwm_softc *sc, void *physt)
 {
-	struct r88a_rx_phystat *stat = (struct r88a_rx_phystat *)physt;
+	struct r12a_rx_phystat *stat = (struct r12a_rx_phystat *)physt;
 	int i, rssi;
 
 	rssi = 0;
@@ -3282,16 +3282,16 @@ urtwm_get_rssi(struct urtwm_softc *sc, int rate, void *physt)
 }
 
 static void
-urtwm_tx_protection(struct urtwm_softc *sc, struct r88a_tx_desc *txd,
+urtwm_tx_protection(struct urtwm_softc *sc, struct r12a_tx_desc *txd,
     enum ieee80211_protmode mode)
 {
 
 	switch (mode) {
 	case IEEE80211_PROT_CTSONLY:
-		txd->txdw3 |= htole32(R88A_TXDW3_CTS2SELF);
+		txd->txdw3 |= htole32(R12A_TXDW3_CTS2SELF);
 		break;
 	case IEEE80211_PROT_RTSCTS:
-		txd->txdw3 |= htole32(R88A_TXDW3_RTSEN);
+		txd->txdw3 |= htole32(R12A_TXDW3_RTSEN);
 		break;
 	default:
 		break;
@@ -3299,19 +3299,19 @@ urtwm_tx_protection(struct urtwm_softc *sc, struct r88a_tx_desc *txd,
 
 	if (mode == IEEE80211_PROT_CTSONLY ||
 	    mode == IEEE80211_PROT_RTSCTS) {
-		txd->txdw3 |= htole32(R88A_TXDW3_HWRTSEN);
+		txd->txdw3 |= htole32(R12A_TXDW3_HWRTSEN);
 
 		/* XXX TODO: rtsrate is configurable? 24mbit may
 		 * be a bit high for RTS rate? */
-		txd->txdw4 |= htole32(SM(R88A_TXDW4_RTSRATE,
+		txd->txdw4 |= htole32(SM(R12A_TXDW4_RTSRATE,
 		    URTWM_RIDX_OFDM24));
 		/* RTS rate fallback limit (max). */
-		txd->txdw4 |= htole32(SM(R88A_TXDW4_RTSRATE_FB_LMT, 0xf));
+		txd->txdw4 |= htole32(SM(R12A_TXDW4_RTSRATE_FB_LMT, 0xf));
 	}
 }
 
 static void
-urtwm_tx_raid(struct urtwm_softc *sc, struct r88a_tx_desc *txd,
+urtwm_tx_raid(struct urtwm_softc *sc, struct r12a_tx_desc *txd,
     struct ieee80211_node *ni, int ismcast)
 {
 	struct ieee80211com *ic = &sc->sc_ic;
@@ -3349,31 +3349,31 @@ urtwm_tx_raid(struct urtwm_softc *sc, struct r88a_tx_desc *txd,
 
 	switch (mode) {
 	case IEEE80211_MODE_11A:
-		raid = R88A_RAID_11G;
+		raid = R12A_RAID_11G;
 		break;
 	case IEEE80211_MODE_11B:
-		raid = R88A_RAID_11B;
+		raid = R12A_RAID_11B;
 		break;
 	case IEEE80211_MODE_11G:
-		raid = R88A_RAID_11BG;
+		raid = R12A_RAID_11BG;
 		break;
 	case IEEE80211_MODE_11NA:
 		if (sc->ntxchains == 1)
-			raid = R88A_RAID_11GN_1;
+			raid = R12A_RAID_11GN_1;
 		else
-			raid = R88A_RAID_11GN_2;
+			raid = R12A_RAID_11GN_2;
 		break;
 	case IEEE80211_MODE_11NG:
 		if (sc->ntxchains == 1) {
 			if (IEEE80211_IS_CHAN_HT40(c))
-				raid = R88A_RAID_11BGN_1_40;
+				raid = R12A_RAID_11BGN_1_40;
 			else
-				raid = R88A_RAID_11BGN_1;
+				raid = R12A_RAID_11BGN_1;
 		} else {
 			if (IEEE80211_IS_CHAN_HT40(c))
-				raid = R88A_RAID_11BGN_2_40;
+				raid = R12A_RAID_11BGN_2_40;
 			else
-				raid = R88A_RAID_11BGN_2;
+				raid = R12A_RAID_11BGN_2;
 		}
 		break;
 	default:
@@ -3382,7 +3382,7 @@ urtwm_tx_raid(struct urtwm_softc *sc, struct r88a_tx_desc *txd,
 		return;
 	}
 
-	txd->txdw1 |= htole32(SM(R88A_TXDW1_RAID, raid));
+	txd->txdw1 |= htole32(SM(R12A_TXDW1_RAID, raid));
 }
 
 static int
@@ -3395,7 +3395,7 @@ urtwm_tx_data(struct urtwm_softc *sc, struct ieee80211_node *ni,
 	struct ieee80211_key *k = NULL;
 	struct ieee80211_channel *chan;
 	struct ieee80211_frame *wh;
-	struct r88a_tx_desc *txd;
+	struct r12a_tx_desc *txd;
 	uint8_t macid, rate, ridx, type, tid, qos, qsel;
 	int hasqos, ismcast;
 
@@ -3459,20 +3459,20 @@ urtwm_tx_data(struct urtwm_softc *sc, struct ieee80211_node *ni,
 	}
 
 	/* Fill Tx descriptor. */
-	txd = (struct r88a_tx_desc *)data->buf;
+	txd = (struct r12a_tx_desc *)data->buf;
 	memset(txd, 0, sizeof(*txd));
 
 	txd->offset = sizeof(*txd);
-	txd->flags0 = R88A_FLAGS0_LSG | R88A_FLAGS0_FSG | R88A_FLAGS0_OWN;
+	txd->flags0 = R12A_FLAGS0_LSG | R12A_FLAGS0_FSG | R12A_FLAGS0_OWN;
 	if (ismcast)
-		txd->flags0 |= R88A_FLAGS0_BMCAST;
+		txd->flags0 |= R12A_FLAGS0_BMCAST;
 
 	if (!ismcast) {
 		/* Unicast frame, check if an ACK is expected. */
 		if (!qos || (qos & IEEE80211_QOS_ACKPOLICY) !=
 		    IEEE80211_QOS_ACKPOLICY_NOACK) {
-			txd->txdw4 = htole32(R88A_TXDW4_RETRY_LMT_ENA);
-			txd->txdw4 |= htole32(SM(R88A_TXDW4_RETRY_LMT,
+			txd->txdw4 = htole32(R12A_TXDW4_RETRY_LMT_ENA);
+			txd->txdw4 |= htole32(SM(R12A_TXDW4_RETRY_LMT,
 			    tp->maxretry));
 		}
 
@@ -3482,11 +3482,11 @@ urtwm_tx_data(struct urtwm_softc *sc, struct ieee80211_node *ni,
 		if (type == IEEE80211_FC0_TYPE_DATA) {
 			qsel = tid % URTWM_MAX_TID;
 
-			txd->txdw2 |= htole32(R88A_TXDW2_AGGBK);
-			txd->txdw2 |= htole32(R88A_TXDW2_SPE_RPT);
+			txd->txdw2 |= htole32(R12A_TXDW2_AGGBK);
+			txd->txdw2 |= htole32(R12A_TXDW2_SPE_RPT);
 
 			if (ic->ic_flags & IEEE80211_F_SHPREAMBLE)
-				txd->txdw5 |= htole32(R88A_TXDW5_SHPRE);
+				txd->txdw5 |= htole32(R12A_TXDW5_SHPRE);
 
 			if (rate & IEEE80211_RATE_MCS) {
 				urtwm_tx_protection(sc, txd,
@@ -3495,38 +3495,38 @@ urtwm_tx_data(struct urtwm_softc *sc, struct ieee80211_node *ni,
 				urtwm_tx_protection(sc, txd, ic->ic_protmode);
 
 			/* Data rate fallback limit (max). */
-			txd->txdw4 |= htole32(SM(R88A_TXDW4_DATARATE_FB_LMT,
+			txd->txdw4 |= htole32(SM(R12A_TXDW4_DATARATE_FB_LMT,
 			    0x1f));
 		} else	/* IEEE80211_FC0_TYPE_MGT */
-			qsel = R88A_TXDW1_QSEL_MGNT;
+			qsel = R12A_TXDW1_QSEL_MGNT;
 	} else {
 		macid = URTWM_MACID_BC;
-		qsel = R88A_TXDW1_QSEL_MGNT;
+		qsel = R12A_TXDW1_QSEL_MGNT;
 	}
 
-	txd->txdw1 |= htole32(SM(R88A_TXDW1_QSEL, qsel));
+	txd->txdw1 |= htole32(SM(R12A_TXDW1_QSEL, qsel));
 
 	/* XXX TODO: 40MHZ flag? */
 	/* XXX TODO: AMPDU flag? (AGG_ENABLE or AGG_BREAK?) Density shift? */
 	/* XXX Short preamble? */
 	/* XXX Short-GI? */
 
-	txd->txdw1 |= htole32(SM(R88A_TXDW1_MACID, macid));
-	txd->txdw4 |= htole32(SM(R88A_TXDW4_DATARATE, ridx));
+	txd->txdw1 |= htole32(SM(R12A_TXDW1_MACID, macid));
+	txd->txdw4 |= htole32(SM(R12A_TXDW4_DATARATE, ridx));
 	urtwm_tx_raid(sc, txd, ni, ismcast);
 
 	/* Force this rate if needed. */
 	if (URTWM_USE_RATECTL(sc) || ismcast ||
 	    (tp->ucastrate != IEEE80211_FIXED_RATE_NONE) ||
 	    (m->m_flags & M_EAPOL) || type != IEEE80211_FC0_TYPE_DATA)
-		txd->txdw3 |= htole32(R88A_TXDW3_DRVRATE);
+		txd->txdw3 |= htole32(R12A_TXDW3_DRVRATE);
 
 	if (!hasqos) {
 		/* Use HW sequence numbering for non-QoS frames. */
-		txd->txdw8 |= htole32(R88A_TXDW8_HWSEQ_EN);
+		txd->txdw8 |= htole32(R12A_TXDW8_HWSEQ_EN);
 	} else {
 		/* Set sequence number. */
-		txd->txdw9 |= htole32(SM(R88A_TXDW9_SEQ,
+		txd->txdw9 |= htole32(SM(R12A_TXDW9_SEQ,
 		    M_SEQNO_GET(m) % IEEE80211_SEQ_RANGE));
 	}
 
@@ -3536,10 +3536,10 @@ urtwm_tx_data(struct urtwm_softc *sc, struct ieee80211_node *ni,
 		switch (k->wk_cipher->ic_cipher) {
 		case IEEE80211_CIPHER_WEP:
 		case IEEE80211_CIPHER_TKIP:
-			cipher = R88A_TXDW1_CIPHER_RC4;
+			cipher = R12A_TXDW1_CIPHER_RC4;
 			break;
 		case IEEE80211_CIPHER_AES_CCM:
-			cipher = R88A_TXDW1_CIPHER_AES;
+			cipher = R12A_TXDW1_CIPHER_AES;
 			break;
 		default:
 			device_printf(sc->sc_dev, "%s: unknown cipher %d\n",
@@ -3547,7 +3547,7 @@ urtwm_tx_data(struct urtwm_softc *sc, struct ieee80211_node *ni,
 			return (EINVAL);
 		}
 
-		txd->txdw1 |= htole32(SM(R88A_TXDW1_CIPHER, cipher));
+		txd->txdw1 |= htole32(SM(R12A_TXDW1_CIPHER, cipher));
 	}
 
 	if (ieee80211_radiotap_active_vap(vap)) {
@@ -3574,12 +3574,12 @@ urtwm_tx_raw(struct urtwm_softc *sc, struct ieee80211_node *ni,
 	struct ieee80211vap *vap = ni->ni_vap;
 	struct ieee80211_key *k = NULL;
 	struct ieee80211_frame *wh;
-	struct r88a_tx_desc *txd;
+	struct r12a_tx_desc *txd;
 	uint8_t cipher, ridx, type;
 	int ismcast;
 
 	/* Encrypt the frame if need be. */
-	cipher = R88A_TXDW1_CIPHER_NONE;
+	cipher = R12A_TXDW1_CIPHER_NONE;
 	if (params->ibp_flags & IEEE80211_BPF_CRYPTO) {
 		/* Retrieve key for TX. */
 		k = ieee80211_crypto_encap(ni, m);
@@ -3590,10 +3590,10 @@ urtwm_tx_raw(struct urtwm_softc *sc, struct ieee80211_node *ni,
 			switch (k->wk_cipher->ic_cipher) {
 			case IEEE80211_CIPHER_WEP:
 			case IEEE80211_CIPHER_TKIP:
-				cipher = R88A_TXDW1_CIPHER_RC4;
+				cipher = R12A_TXDW1_CIPHER_RC4;
 				break;
 			case IEEE80211_CIPHER_AES_CCM:
-				cipher = R88A_TXDW1_CIPHER_AES;
+				cipher = R12A_TXDW1_CIPHER_AES;
 				break;
 			default:
 				device_printf(sc->sc_dev,
@@ -3611,43 +3611,43 @@ urtwm_tx_raw(struct urtwm_softc *sc, struct ieee80211_node *ni,
 	ismcast = IEEE80211_IS_MULTICAST(wh->i_addr1);
 
 	/* Fill Tx descriptor. */
-	txd = (struct r88a_tx_desc *)data->buf;
+	txd = (struct r12a_tx_desc *)data->buf;
 	memset(txd, 0, sizeof(*txd));
 
 	txd->offset = sizeof(*txd);
-	txd->flags0 |= R88A_FLAGS0_LSG | R88A_FLAGS0_FSG | R88A_FLAGS0_OWN;
+	txd->flags0 |= R12A_FLAGS0_LSG | R12A_FLAGS0_FSG | R12A_FLAGS0_OWN;
 	if (ismcast)
-		txd->flags0 |= R88A_FLAGS0_BMCAST;
+		txd->flags0 |= R12A_FLAGS0_BMCAST;
 
 	if ((params->ibp_flags & IEEE80211_BPF_NOACK) == 0) {
-		txd->txdw4 = htole32(R88A_TXDW4_RETRY_LMT_ENA);
-		txd->txdw4 |= htole32(SM(R88A_TXDW4_RETRY_LMT,
+		txd->txdw4 = htole32(R12A_TXDW4_RETRY_LMT_ENA);
+		txd->txdw4 |= htole32(SM(R12A_TXDW4_RETRY_LMT,
 		    params->ibp_try0));
 	}
 	if (params->ibp_flags & IEEE80211_BPF_SHORTPRE)
-		txd->txdw5 |= htole32(R88A_TXDW5_SHPRE);
+		txd->txdw5 |= htole32(R12A_TXDW5_SHPRE);
 	if (params->ibp_flags & IEEE80211_BPF_RTS)
 		urtwm_tx_protection(sc, txd, IEEE80211_PROT_RTSCTS);
 	if (params->ibp_flags & IEEE80211_BPF_CTS)
 		urtwm_tx_protection(sc, txd, IEEE80211_PROT_CTSONLY);
 
-	txd->txdw1 |= htole32(SM(R88A_TXDW1_MACID, URTWM_MACID_BC));
-	txd->txdw1 |= htole32(SM(R88A_TXDW1_QSEL, R88A_TXDW1_QSEL_MGNT));
-	txd->txdw1 |= htole32(SM(R88A_TXDW1_CIPHER, cipher));
+	txd->txdw1 |= htole32(SM(R12A_TXDW1_MACID, URTWM_MACID_BC));
+	txd->txdw1 |= htole32(SM(R12A_TXDW1_QSEL, R12A_TXDW1_QSEL_MGNT));
+	txd->txdw1 |= htole32(SM(R12A_TXDW1_CIPHER, cipher));
 
 	/* Choose a TX rate index. */
 	ridx = rate2ridx(params->ibp_rate0);
-	txd->txdw4 |= htole32(SM(R88A_TXDW4_DATARATE, ridx));
-	txd->txdw4 |= htole32(SM(R88A_TXDW4_DATARATE_FB_LMT, 0x1f));
-	txd->txdw3 |= htole32(R88A_TXDW3_DRVRATE);
+	txd->txdw4 |= htole32(SM(R12A_TXDW4_DATARATE, ridx));
+	txd->txdw4 |= htole32(SM(R12A_TXDW4_DATARATE_FB_LMT, 0x1f));
+	txd->txdw3 |= htole32(R12A_TXDW3_DRVRATE);
 	urtwm_tx_raid(sc, txd, ni, ismcast);
 
 	if (!IEEE80211_QOS_HAS_SEQ(wh)) {
 		/* Use HW sequence numbering for non-QoS frames. */
-		txd->txdw8 |= htole32(R88A_TXDW8_HWSEQ_EN);
+		txd->txdw8 |= htole32(R12A_TXDW8_HWSEQ_EN);
 	} else {
 		/* Set sequence number. */
-		txd->txdw9 |= htole32(SM(R88A_TXDW9_SEQ,
+		txd->txdw9 |= htole32(SM(R12A_TXDW9_SEQ,
 		    M_SEQNO_GET(m) % IEEE80211_SEQ_RANGE));
 	}
 
@@ -3672,7 +3672,7 @@ urtwm_tx_start(struct urtwm_softc *sc, struct mbuf *m, uint8_t type,
     struct urtwm_data *data)
 {
 	struct usb_xfer *xfer;
-	struct r88a_tx_desc *txd;
+	struct r12a_tx_desc *txd;
 	uint16_t ac;
 	int xferlen;
 
@@ -3690,7 +3690,7 @@ urtwm_tx_start(struct urtwm_softc *sc, struct mbuf *m, uint8_t type,
 		break;
 	}
 
-	txd = (struct r88a_tx_desc *)data->buf;
+	txd = (struct r12a_tx_desc *)data->buf;
 	txd->pktlen = htole16(m->m_pkthdr.len);
 
 	/* Compute Tx descriptor checksum. */
@@ -3708,7 +3708,7 @@ urtwm_tx_start(struct urtwm_softc *sc, struct mbuf *m, uint8_t type,
 }
 
 static void
-urtwm_tx_checksum(struct r88a_tx_desc *txd)
+urtwm_tx_checksum(struct r12a_tx_desc *txd)
 {
 	uint16_t sum = 0;
 	int i;
@@ -4016,8 +4016,8 @@ urtwm_r12a_power_off(struct urtwm_softc *sc)
 	}
 
 	/* Turn off 3-wire. */
-	urtwm_write_1(sc, R88A_HSSI_PARAM1(0), 0x04);
-	urtwm_write_1(sc, R88A_HSSI_PARAM1(1), 0x04);
+	urtwm_write_1(sc, R12A_HSSI_PARAM1(0), 0x04);
+	urtwm_write_1(sc, R12A_HSSI_PARAM1(1), 0x04);
 
 	/* CCK and OFDM are disabled, and clock are gated. */
 	urtwm_setbits_1(sc, R92C_SYS_FUNC_EN, R92C_SYS_FUNC_EN_BBRSTB, 0);
@@ -4050,8 +4050,8 @@ urtwm_r12a_power_off(struct urtwm_softc *sc)
 
 	/* Move card to Disabled state. */
 	/* Turn off 3-wire. */
-	urtwm_write_1(sc, R88A_HSSI_PARAM1(0), 0x04);
-	urtwm_write_1(sc, R88A_HSSI_PARAM1(1), 0x04);
+	urtwm_write_1(sc, R12A_HSSI_PARAM1(0), 0x04);
+	urtwm_write_1(sc, R12A_HSSI_PARAM1(1), 0x04);
 
 	/* Reset BB, close RF. */
 	urtwm_setbits_1(sc, R92C_SYS_FUNC_EN, R92C_SYS_FUNC_EN_BB_GLB_RST, 0);
@@ -4123,7 +4123,7 @@ urtwm_r12a_power_off(struct urtwm_softc *sc)
 	urtwm_setbits_1(sc, R92C_RF_CTRL, R92C_RF_CTRL_RSTB, 0);
 
 	/* Disable RFC_1. */
-	urtwm_setbits_1(sc, R88A_RF_B_CTRL, R92C_RF_CTRL_RSTB, 0);
+	urtwm_setbits_1(sc, R12A_RF_B_CTRL, R92C_RF_CTRL_RSTB, 0);
 
 	/* Enable WL suspend. */
 	urtwm_setbits_1_shift(sc, R92C_APS_FSMCO, 0, R92C_APS_FSMCO_AFSM_HSUS,
@@ -4358,7 +4358,7 @@ urtwm_load_firmware(struct urtwm_softc *sc)
 	}
 
 	len = fw->datasize;
-	if (len < sizeof(*hdr) || len > R88A_MAX_FW_SIZE) {
+	if (len < sizeof(*hdr) || len > R12A_MAX_FW_SIZE) {
 		device_printf(sc->sc_dev, "wrong firmware size (%d)\n", len);
 		error = EINVAL;
 		goto fail;
@@ -4511,10 +4511,10 @@ urtwm_dma_init(struct urtwm_softc *sc)
 	if (URTWM_CHIP_IS_21A(sc)) {	/* XXX use another macro */
 		URTWM_CHK(urtwm_write_1(sc, R88E_TXPKTBUF_BCNQ1_BDNY,
 		    sc->tx_boundary + 8));	/* XXX hardcoded */
-		URTWM_CHK(urtwm_write_1(sc, R88A_DWBCN1_CTRL + 1,
+		URTWM_CHK(urtwm_write_1(sc, R12A_DWBCN1_CTRL + 1,
 		    sc->tx_boundary + 8));
-		URTWM_CHK(urtwm_setbits_1(sc, R88A_DWBCN1_CTRL + 2, 0,
-		    R88A_DWBCN1_CTRL_SEL_EN));
+		URTWM_CHK(urtwm_setbits_1(sc, R12A_DWBCN1_CTRL + 2, 0,
+		    R12A_DWBCN1_CTRL_SEL_EN));
 	}
 
 	/* Set queue to USB pipe mapping. */
@@ -4576,7 +4576,7 @@ urtwm_bb_init(struct urtwm_softc *sc)
 	    R92C_RF_CTRL_EN | R92C_RF_CTRL_RSTB | R92C_RF_CTRL_SDMRSTB);
 
 	/* PathB RF Power On. */
-	urtwm_write_1(sc, R88A_RF_B_CTRL,
+	urtwm_write_1(sc, R12A_RF_B_CTRL,
 	    R92C_RF_CTRL_EN | R92C_RF_CTRL_RSTB | R92C_RF_CTRL_SDMRSTB);
 
 	/* Write BB initialization values. */
@@ -4623,9 +4623,9 @@ urtwm_bb_init(struct urtwm_softc *sc)
 	}
 
 	for (i = 0; i < sc->nrxchains; i++) {
-		urtwm_bb_write(sc, R88A_INITIAL_GAIN(i), 0x22);
+		urtwm_bb_write(sc, R12A_INITIAL_GAIN(i), 0x22);
 		urtwm_delay(sc, 1);
-		urtwm_bb_write(sc, R88A_INITIAL_GAIN(i), 0x20);
+		urtwm_bb_write(sc, R12A_INITIAL_GAIN(i), 0x20);
 		urtwm_delay(sc, 1);
 	}
 
@@ -4635,24 +4635,24 @@ urtwm_bb_init(struct urtwm_softc *sc)
 		/* XXX cannot happen yet. */
 		if (sc->ntxchains == 1 && sc->nrxchains == 1) {
 			/* BB OFDM Rx path A. */
-			urtwm_bb_setbits(sc, R88A_RX_PATH, 0xff, 0x11);
+			urtwm_bb_setbits(sc, R12A_RX_PATH, 0xff, 0x11);
 			/* BB OFDM Tx path A. */
-			urtwm_bb_setbits(sc, R88A_TX_PATH, 0xfffffff, 0x1111);
+			urtwm_bb_setbits(sc, R12A_TX_PATH, 0xfffffff, 0x1111);
 			/* BB CCK R/Rx path A. */
-			urtwm_bb_setbits(sc, R88A_CCK_RX_PATH, 0x0c000000, 0);
+			urtwm_bb_setbits(sc, R12A_CCK_RX_PATH, 0x0c000000, 0);
 			/* MCS support. */
 			urtwm_bb_setbits(sc, 0x8bc, 0xc0000060, 0);
 			/* RF Path B HSSI off. */
-			urtwm_bb_setbits(sc, R88A_HSSI_PARAM1(1), 0x0f, 0x04);
+			urtwm_bb_setbits(sc, R12A_HSSI_PARAM1(1), 0x0f, 0x04);
 			/* RF Path B power down. */
-			urtwm_bb_write(sc, R88A_LSSI_PARAM(1), 0);
+			urtwm_bb_write(sc, R12A_LSSI_PARAM(1), 0);
 			/* ADDA Path B off. */
-			urtwm_bb_write(sc, R88A_AFE_POWER_1(1), 0);
-			urtwm_bb_write(sc, R88A_AFE_POWER_2(1), 0);
+			urtwm_bb_write(sc, R12A_AFE_POWER_1(1), 0);
+			urtwm_bb_write(sc, R12A_AFE_POWER_2(1), 0);
 		}
 
-		if (urtwm_bb_read(sc, R88A_CCK_RPT_FORMAT) &
-		    R88A_CCK_RPT_FORMAT_HIPWR)
+		if (urtwm_bb_read(sc, R12A_CCK_RPT_FORMAT) &
+		    R12A_CCK_RPT_FORMAT_HIPWR)
 			sc->sc_flags |= URTWM_FLAG_CCK_HIPWR;
 	}
 }
@@ -4665,7 +4665,7 @@ urtwm_r12a_crystalcap_write(struct urtwm_softc *sc)
 
 	val = sc->crystalcap & 0x3f;
 	reg = urtwm_bb_read(sc, R92C_MAC_PHY_CTRL);
-	reg = RW(reg, R8812A_MAC_PHY_CRYSTALCAP, val | (val << 6));
+	reg = RW(reg, R12A_MAC_PHY_CRYSTALCAP, val | (val << 6));
 	urtwm_bb_write(sc, R92C_MAC_PHY_CTRL, reg);
 }
 
@@ -4677,7 +4677,7 @@ urtwm_r21a_crystalcap_write(struct urtwm_softc *sc)
 
 	val = sc->crystalcap & 0x3f;
 	reg = urtwm_bb_read(sc, R92C_MAC_PHY_CTRL);
-	reg = RW(reg, R8821A_MAC_PHY_CRYSTALCAP, val | (val << 6));
+	reg = RW(reg, R21A_MAC_PHY_CRYSTALCAP, val | (val << 6));
 	urtwm_bb_write(sc, R92C_MAC_PHY_CTRL, reg);
 }
 
@@ -4738,62 +4738,62 @@ static void
 urtwm_arfb_init(struct urtwm_softc *sc)
 {
 	/* ARFB table 9 for 11ac 5G 2SS. */
-	urtwm_write_4(sc, R88A_ARFR_5G(0), 0x00000010);
-	urtwm_write_4(sc, R88A_ARFR_5G(0) + 4, 0xfffff000);
+	urtwm_write_4(sc, R12A_ARFR_5G(0), 0x00000010);
+	urtwm_write_4(sc, R12A_ARFR_5G(0) + 4, 0xfffff000);
 
 	/* ARFB table 10 for 11ac 5G 1SS. */
-	urtwm_write_4(sc, R88A_ARFR_5G(1), 0x00000010);
-	urtwm_write_4(sc, R88A_ARFR_5G(1) + 4, 0x003ff000);
+	urtwm_write_4(sc, R12A_ARFR_5G(1), 0x00000010);
+	urtwm_write_4(sc, R12A_ARFR_5G(1) + 4, 0x003ff000);
 
 	/* ARFB table 11 for 11ac 2G 1SS. */
-	urtwm_write_4(sc, R88A_ARFR_2G(0), 0x00000015);
-	urtwm_write_4(sc, R88A_ARFR_2G(0) + 4, 0x003ff000);
+	urtwm_write_4(sc, R12A_ARFR_2G(0), 0x00000015);
+	urtwm_write_4(sc, R12A_ARFR_2G(0) + 4, 0x003ff000);
 
 	/* ARFB table 12 for 11ac 2G 2SS. */
-	urtwm_write_4(sc, R88A_ARFR_2G(1), 0x00000015);
-	urtwm_write_4(sc, R88A_ARFR_2G(1) + 4, 0xffcff000);
+	urtwm_write_4(sc, R12A_ARFR_2G(1), 0x00000015);
+	urtwm_write_4(sc, R12A_ARFR_2G(1) + 4, 0xffcff000);
 }
 
 static void
 urtwm_r12a_set_band_2ghz(struct urtwm_softc *sc)
 {
 	/* Stop Tx / Rx. */
-	urtwm_bb_setbits(sc, R88A_OFDMCCK_EN,
-	    R88A_OFDMCCK_EN_CCK | R88A_OFDMCCK_EN_OFDM, 0);
+	urtwm_bb_setbits(sc, R12A_OFDMCCK_EN,
+	    R12A_OFDMCCK_EN_CCK | R12A_OFDMCCK_EN_OFDM, 0);
 
-	urtwm_bb_setbits(sc, R88A_PWED_TH, 0x0e, 0x08);
-	urtwm_bb_setbits(sc, R88A_BW_INDICATION, 0x03, 0x01);
+	urtwm_bb_setbits(sc, R12A_PWED_TH, 0x0e, 0x08);
+	urtwm_bb_setbits(sc, R12A_BW_INDICATION, 0x03, 0x01);
 
 	/* Select AGC table. */
-	urtwm_bb_setbits(sc, R88A_TXAGC_TABLE_SELECT, 0x03, 0);
+	urtwm_bb_setbits(sc, R12A_TXAGC_TABLE_SELECT, 0x03, 0);
 
 	switch (sc->rfe_type) {
 	case 0:
 	case 1:
 	case 2:
-		urtwm_bb_write(sc, R88A_RFE_PINMUX(0), 0x77777777);
-		urtwm_bb_write(sc, R88A_RFE_PINMUX(1), 0x77777777);
-		urtwm_bb_setbits(sc, R88A_RFE_INV(0), 0x3ff00000, 0);
-		urtwm_bb_setbits(sc, R88A_RFE_INV(1), 0x3ff00000, 0);
+		urtwm_bb_write(sc, R12A_RFE_PINMUX(0), 0x77777777);
+		urtwm_bb_write(sc, R12A_RFE_PINMUX(1), 0x77777777);
+		urtwm_bb_setbits(sc, R12A_RFE_INV(0), 0x3ff00000, 0);
+		urtwm_bb_setbits(sc, R12A_RFE_INV(1), 0x3ff00000, 0);
 		break;
 	case 3:
-		urtwm_bb_write(sc, R88A_RFE_PINMUX(0), 0x54337770);
-		urtwm_bb_write(sc, R88A_RFE_PINMUX(1), 0x54337770);
-		urtwm_bb_setbits(sc, R88A_RFE_INV(0), 0x3ff00000, 0x01000000);
-		urtwm_bb_setbits(sc, R88A_RFE_INV(1), 0x3ff00000, 0x01000000);
-		urtwm_bb_setbits(sc, R88A_ANTSEL_SW, 0x0303, 0x01);
+		urtwm_bb_write(sc, R12A_RFE_PINMUX(0), 0x54337770);
+		urtwm_bb_write(sc, R12A_RFE_PINMUX(1), 0x54337770);
+		urtwm_bb_setbits(sc, R12A_RFE_INV(0), 0x3ff00000, 0x01000000);
+		urtwm_bb_setbits(sc, R12A_RFE_INV(1), 0x3ff00000, 0x01000000);
+		urtwm_bb_setbits(sc, R12A_ANTSEL_SW, 0x0303, 0x01);
 		break;
 	case 4:
-		urtwm_bb_write(sc, R88A_RFE_PINMUX(0), 0x77777777);
-		urtwm_bb_write(sc, R88A_RFE_PINMUX(1), 0x77777777);
-		urtwm_bb_setbits(sc, R88A_RFE_INV(0), 0x3ff00000, 0x00100000);
-		urtwm_bb_setbits(sc, R88A_RFE_INV(1), 0x3ff00000, 0x00100000);
+		urtwm_bb_write(sc, R12A_RFE_PINMUX(0), 0x77777777);
+		urtwm_bb_write(sc, R12A_RFE_PINMUX(1), 0x77777777);
+		urtwm_bb_setbits(sc, R12A_RFE_INV(0), 0x3ff00000, 0x00100000);
+		urtwm_bb_setbits(sc, R12A_RFE_INV(1), 0x3ff00000, 0x00100000);
 		break;
 	case 5:
-		urtwm_write_1(sc, R88A_RFE_PINMUX(0) + 2, 0x77);
-		urtwm_bb_write(sc, R88A_RFE_PINMUX(1), 0x77777777);
-		urtwm_setbits_1(sc, R88A_RFE_INV(0) + 3, 0x01, 0);
-		urtwm_bb_setbits(sc, R88A_RFE_INV(1), 0x3ff00000, 0);
+		urtwm_write_1(sc, R12A_RFE_PINMUX(0) + 2, 0x77);
+		urtwm_bb_write(sc, R12A_RFE_PINMUX(1), 0x77777777);
+		urtwm_setbits_1(sc, R12A_RFE_INV(0) + 3, 0x01, 0);
+		urtwm_bb_setbits(sc, R12A_RFE_INV(1), 0x3ff00000, 0);
 		break;
 	default:
 		break;
@@ -4804,45 +4804,45 @@ urtwm_r12a_set_band_2ghz(struct urtwm_softc *sc)
 	urtwm_setbits_4(sc, R92C_RRSR, R92C_RRSR_RATE_BITMAP_M, 0x15d);
 
 	/* Enable CCK. */
-	urtwm_bb_setbits(sc, R88A_OFDMCCK_EN, 0,
-	    R88A_OFDMCCK_EN_CCK | R88A_OFDMCCK_EN_OFDM);
+	urtwm_bb_setbits(sc, R12A_OFDMCCK_EN, 0,
+	    R12A_OFDMCCK_EN_CCK | R12A_OFDMCCK_EN_OFDM);
 
-	urtwm_write_1(sc, R88A_CCK_CHECK, 0);
+	urtwm_write_1(sc, R12A_CCK_CHECK, 0);
 }
 
 static void
 urtwm_r21a_set_band_2ghz(struct urtwm_softc *sc)
 {
 	/* Stop Tx / Rx. */
-	urtwm_bb_setbits(sc, R88A_OFDMCCK_EN,
-	    R88A_OFDMCCK_EN_CCK | R88A_OFDMCCK_EN_OFDM, 0);
+	urtwm_bb_setbits(sc, R12A_OFDMCCK_EN,
+	    R12A_OFDMCCK_EN_CCK | R12A_OFDMCCK_EN_OFDM, 0);
 
 	/* Turn off RF PA and LNA. */
-	urtwm_bb_setbits(sc, R88A_RFE_PINMUX(0),
-	    R88A_RFE_PINMUX_LNA_MASK, 0x7);
-	urtwm_bb_setbits(sc, R88A_RFE_PINMUX(0),
-	    R88A_RFE_PINMUX_PA_A_MASK, 0x7);
+	urtwm_bb_setbits(sc, R12A_RFE_PINMUX(0),
+	    R12A_RFE_PINMUX_LNA_MASK, 0x7);
+	urtwm_bb_setbits(sc, R12A_RFE_PINMUX(0),
+	    R12A_RFE_PINMUX_PA_A_MASK, 0x7);
 
 	if (sc->ext_lna_2g) {
 		/* Turn on 2.4 GHz external LNA. */
-		urtwm_bb_setbits(sc, R88A_RFE_INV(0), 0, 0x00100000);
-		urtwm_bb_setbits(sc, R88A_RFE_INV(0), 0x00400000, 0);
-		urtwm_bb_setbits(sc, R88A_RFE_PINMUX(0), 0x7, 0x2);
-		urtwm_bb_setbits(sc, R88A_RFE_PINMUX(0), 0x700, 0x200);
+		urtwm_bb_setbits(sc, R12A_RFE_INV(0), 0, 0x00100000);
+		urtwm_bb_setbits(sc, R12A_RFE_INV(0), 0x00400000, 0);
+		urtwm_bb_setbits(sc, R12A_RFE_PINMUX(0), 0x7, 0x2);
+		urtwm_bb_setbits(sc, R12A_RFE_PINMUX(0), 0x700, 0x200);
 	}
 
 	/* Select AGC table. */
-	urtwm_bb_setbits(sc, R88A_TX_SCALE(0), 0x0f00, 0);
+	urtwm_bb_setbits(sc, R12A_TX_SCALE(0), 0x0f00, 0);
 
 	/* Write basic rates (1, 5.5, 11, 6, 12, 24). */
 	/* XXX check ic_curmode. */
 	urtwm_setbits_4(sc, R92C_RRSR, R92C_RRSR_RATE_BITMAP_M, 0x15d);
 
 	/* Enable CCK. */
-	urtwm_bb_setbits(sc, R88A_OFDMCCK_EN, 0,
-	    R88A_OFDMCCK_EN_CCK | R88A_OFDMCCK_EN_OFDM);
+	urtwm_bb_setbits(sc, R12A_OFDMCCK_EN, 0,
+	    R12A_OFDMCCK_EN_CCK | R12A_OFDMCCK_EN_OFDM);
 
-	urtwm_write_1(sc, R88A_CCK_CHECK, 0);
+	urtwm_write_1(sc, R12A_CCK_CHECK, 0);
 }
 
 static void
@@ -4850,10 +4850,10 @@ urtwm_r12a_set_band_5ghz(struct urtwm_softc *sc)
 {
 	int ntries;
 
-	urtwm_write_1(sc, R88A_CCK_CHECK, 0x80);
+	urtwm_write_1(sc, R12A_CCK_CHECK, 0x80);
 
 	for (ntries = 0; ntries < 100; ntries++) {
-		if ((urtwm_read_2(sc, R88A_TXPKT_EMPTY) & 0x30) == 0x30)
+		if ((urtwm_read_2(sc, R12A_TXPKT_EMPTY) & 0x30) == 0x30)
 			break;
 
 		urtwm_delay(sc, 25);
@@ -4861,51 +4861,51 @@ urtwm_r12a_set_band_5ghz(struct urtwm_softc *sc)
 	if (ntries == 100) {
 		device_printf(sc->sc_dev,
 		    "%s: TXPKT_EMPTY check failed (%04X)\n",
-		    __func__, urtwm_read_2(sc, R88A_TXPKT_EMPTY));
+		    __func__, urtwm_read_2(sc, R12A_TXPKT_EMPTY));
 	}
 
 	/* Stop Tx / Rx. */
-	urtwm_bb_setbits(sc, R88A_OFDMCCK_EN,
-	    R88A_OFDMCCK_EN_CCK | R88A_OFDMCCK_EN_OFDM, 0);
+	urtwm_bb_setbits(sc, R12A_OFDMCCK_EN,
+	    R12A_OFDMCCK_EN_CCK | R12A_OFDMCCK_EN_OFDM, 0);
 
-	urtwm_bb_setbits(sc, R88A_PWED_TH, 0x0e, 0x03);
-	urtwm_bb_setbits(sc, R88A_BW_INDICATION, 0x03, 0x02);
+	urtwm_bb_setbits(sc, R12A_PWED_TH, 0x0e, 0x03);
+	urtwm_bb_setbits(sc, R12A_BW_INDICATION, 0x03, 0x02);
 
 	/* Select AGC table. */
-	urtwm_bb_setbits(sc, R88A_TXAGC_TABLE_SELECT, 0x03, 0x01);
+	urtwm_bb_setbits(sc, R12A_TXAGC_TABLE_SELECT, 0x03, 0x01);
 
 	switch (sc->rfe_type) {
 	case 0:
-		urtwm_bb_write(sc, R88A_RFE_PINMUX(0), 0x77337717);
-		urtwm_bb_write(sc, R88A_RFE_PINMUX(1), 0x77337717);
-		urtwm_bb_setbits(sc, R88A_RFE_INV(0), 0x3ff00000, 0x01000000);
-		urtwm_bb_setbits(sc, R88A_RFE_INV(1), 0x3ff00000, 0x01000000);
+		urtwm_bb_write(sc, R12A_RFE_PINMUX(0), 0x77337717);
+		urtwm_bb_write(sc, R12A_RFE_PINMUX(1), 0x77337717);
+		urtwm_bb_setbits(sc, R12A_RFE_INV(0), 0x3ff00000, 0x01000000);
+		urtwm_bb_setbits(sc, R12A_RFE_INV(1), 0x3ff00000, 0x01000000);
 		break;
 	case 1:
-		urtwm_bb_write(sc, R88A_RFE_PINMUX(0), 0x77337717);
-		urtwm_bb_write(sc, R88A_RFE_PINMUX(1), 0x77337717);
-		urtwm_bb_setbits(sc, R88A_RFE_INV(0), 0x3ff00000, 0);
-		urtwm_bb_setbits(sc, R88A_RFE_INV(1), 0x3ff00000, 0);
+		urtwm_bb_write(sc, R12A_RFE_PINMUX(0), 0x77337717);
+		urtwm_bb_write(sc, R12A_RFE_PINMUX(1), 0x77337717);
+		urtwm_bb_setbits(sc, R12A_RFE_INV(0), 0x3ff00000, 0);
+		urtwm_bb_setbits(sc, R12A_RFE_INV(1), 0x3ff00000, 0);
 		break;
 	case 2:
 	case 4:
-		urtwm_bb_write(sc, R88A_RFE_PINMUX(0), 0x77337777);
-		urtwm_bb_write(sc, R88A_RFE_PINMUX(1), 0x77337777);
-		urtwm_bb_setbits(sc, R88A_RFE_INV(0), 0x3ff00000, 0x01000000);
-		urtwm_bb_setbits(sc, R88A_RFE_INV(1), 0x3ff00000, 0x01000000);
+		urtwm_bb_write(sc, R12A_RFE_PINMUX(0), 0x77337777);
+		urtwm_bb_write(sc, R12A_RFE_PINMUX(1), 0x77337777);
+		urtwm_bb_setbits(sc, R12A_RFE_INV(0), 0x3ff00000, 0x01000000);
+		urtwm_bb_setbits(sc, R12A_RFE_INV(1), 0x3ff00000, 0x01000000);
 		break;
 	case 3:
-		urtwm_bb_write(sc, R88A_RFE_PINMUX(0), 0x54337717);
-		urtwm_bb_write(sc, R88A_RFE_PINMUX(1), 0x54337717);
-		urtwm_bb_setbits(sc, R88A_RFE_INV(0), 0x3ff00000, 0x01000000);
-		urtwm_bb_setbits(sc, R88A_RFE_INV(1), 0x3ff00000, 0x01000000);
-		urtwm_bb_setbits(sc, R88A_ANTSEL_SW, 0x0303, 0x01);
+		urtwm_bb_write(sc, R12A_RFE_PINMUX(0), 0x54337717);
+		urtwm_bb_write(sc, R12A_RFE_PINMUX(1), 0x54337717);
+		urtwm_bb_setbits(sc, R12A_RFE_INV(0), 0x3ff00000, 0x01000000);
+		urtwm_bb_setbits(sc, R12A_RFE_INV(1), 0x3ff00000, 0x01000000);
+		urtwm_bb_setbits(sc, R12A_ANTSEL_SW, 0x0303, 0x01);
 		break;
 	case 5:
-		urtwm_write_1(sc, R88A_RFE_PINMUX(0) + 2, 0x33);
-		urtwm_bb_write(sc, R88A_RFE_PINMUX(1), 0x77337777);
-		urtwm_setbits_1(sc, R88A_RFE_INV(0) + 3, 0, 0x01);
-		urtwm_bb_setbits(sc, R88A_RFE_INV(1), 0x3ff00000, 0x01000000);
+		urtwm_write_1(sc, R12A_RFE_PINMUX(0) + 2, 0x33);
+		urtwm_bb_write(sc, R12A_RFE_PINMUX(1), 0x77337777);
+		urtwm_setbits_1(sc, R12A_RFE_INV(0) + 3, 0, 0x01);
+		urtwm_bb_setbits(sc, R12A_RFE_INV(1), 0x3ff00000, 0x01000000);
 		break;
 	default:
 		break;
@@ -4916,7 +4916,7 @@ urtwm_r12a_set_band_5ghz(struct urtwm_softc *sc)
 	urtwm_setbits_4(sc, R92C_RRSR, R92C_RRSR_RATE_BITMAP_M, 0x150);
 
 	/* Enable OFDM. */
-	urtwm_bb_setbits(sc, R88A_OFDMCCK_EN, 0, R88A_OFDMCCK_EN_OFDM);
+	urtwm_bb_setbits(sc, R12A_OFDMCCK_EN, 0, R12A_OFDMCCK_EN_OFDM);
 }
 
 static void
@@ -4924,23 +4924,23 @@ urtwm_r21a_set_band_5ghz(struct urtwm_softc *sc)
 {
 	int ntries;
 
-	urtwm_bb_setbits(sc, R88A_RFE_PINMUX(0),
-	    R88A_RFE_PINMUX_LNA_MASK, 0x5);
-	urtwm_bb_setbits(sc, R88A_RFE_PINMUX(0),
-	    R88A_RFE_PINMUX_PA_A_MASK, 0x4);
+	urtwm_bb_setbits(sc, R12A_RFE_PINMUX(0),
+	    R12A_RFE_PINMUX_LNA_MASK, 0x5);
+	urtwm_bb_setbits(sc, R12A_RFE_PINMUX(0),
+	    R12A_RFE_PINMUX_PA_A_MASK, 0x4);
 
 	if (sc->ext_lna_2g) {
 		/* Bypass 2.4 GHz external LNA. */
-		urtwm_bb_setbits(sc, R88A_RFE_INV(0), 0x00100000, 0);
-		urtwm_bb_setbits(sc, R88A_RFE_INV(0), 0x00400000, 0);
-		urtwm_bb_setbits(sc, R88A_RFE_PINMUX(0), 0, 0x7);
-		urtwm_bb_setbits(sc, R88A_RFE_PINMUX(0), 0, 0x700);
+		urtwm_bb_setbits(sc, R12A_RFE_INV(0), 0x00100000, 0);
+		urtwm_bb_setbits(sc, R12A_RFE_INV(0), 0x00400000, 0);
+		urtwm_bb_setbits(sc, R12A_RFE_PINMUX(0), 0, 0x7);
+		urtwm_bb_setbits(sc, R12A_RFE_PINMUX(0), 0, 0x700);
 	}
 
-	urtwm_write_1(sc, R88A_CCK_CHECK, 0x80);
+	urtwm_write_1(sc, R12A_CCK_CHECK, 0x80);
 
 	for (ntries = 0; ntries < 100; ntries++) {
-		if ((urtwm_read_2(sc, R88A_TXPKT_EMPTY) & 0x30) == 0x30)
+		if ((urtwm_read_2(sc, R12A_TXPKT_EMPTY) & 0x30) == 0x30)
 			break;
 
 		urtwm_delay(sc, 25);
@@ -4948,22 +4948,22 @@ urtwm_r21a_set_band_5ghz(struct urtwm_softc *sc)
 	if (ntries == 100) {
 		device_printf(sc->sc_dev,
 		    "%s: TXPKT_EMPTY check failed (%04X)\n",
-		    __func__, urtwm_read_2(sc, R88A_TXPKT_EMPTY));
+		    __func__, urtwm_read_2(sc, R12A_TXPKT_EMPTY));
 	}
 
 	/* Stop Tx / Rx. */
-	urtwm_bb_setbits(sc, R88A_OFDMCCK_EN,
-	    R88A_OFDMCCK_EN_CCK | R88A_OFDMCCK_EN_OFDM, 0);
+	urtwm_bb_setbits(sc, R12A_OFDMCCK_EN,
+	    R12A_OFDMCCK_EN_CCK | R12A_OFDMCCK_EN_OFDM, 0);
 
 	/* Select AGC table. */
-	urtwm_bb_setbits(sc, R88A_TX_SCALE(0), 0x0f00, 0x0100);
+	urtwm_bb_setbits(sc, R12A_TX_SCALE(0), 0x0f00, 0x0100);
 
 	/* Write basic rates (6, 12, 24). */
 	/* XXX obtain from net80211. */
 	urtwm_setbits_4(sc, R92C_RRSR, R92C_RRSR_RATE_BITMAP_M, 0x150);
 
 	/* Enable OFDM. */
-	urtwm_bb_setbits(sc, R88A_OFDMCCK_EN, 0, R88A_OFDMCCK_EN_OFDM);
+	urtwm_bb_setbits(sc, R12A_OFDMCCK_EN, 0, R12A_OFDMCCK_EN_OFDM);
 }
 
 static void
@@ -4974,7 +4974,7 @@ urtwm_set_band(struct urtwm_softc *sc, struct ieee80211_channel *c, int force)
 
 	/* Check if band was changed. */
 	if (!force && IEEE80211_IS_CHAN_5GHZ(c) ^
-	    !(urtwm_read_1(sc, R88A_CCK_CHECK) & R88A_CCK_CHECK_5GHZ))
+	    !(urtwm_read_1(sc, R12A_CCK_CHECK) & R12A_CCK_CHECK_5GHZ))
 		return;
 
 	if (IEEE80211_IS_CHAN_2GHZ(c)) {
@@ -5007,8 +5007,8 @@ urtwm_set_band(struct urtwm_softc *sc, struct ieee80211_channel *c, int force)
 			break;
 		}
 
-		urtwm_bb_setbits(sc, R88A_TX_SCALE(i), R88A_TX_SCALE_SWING_M,
-		    val << R88A_TX_SCALE_SWING_S);
+		urtwm_bb_setbits(sc, R12A_TX_SCALE(i), R12A_TX_SCALE_SWING_M,
+		    val << R12A_TX_SCALE_SWING_S);
 	}
 }
 
@@ -5123,7 +5123,7 @@ urtwm_mrr_init(struct urtwm_softc *sc)
 	int i;
 
 	/* Drop rate index by 1 per retry. */
-	for (i = 0; i < R88A_MRR_SIZE; i++)
+	for (i = 0; i < R12A_MRR_SIZE; i++)
 		urtwm_write_1(sc, R92C_DARFRC + i, i + 1);
 }
 
@@ -5134,46 +5134,46 @@ urtwm_write_txpower(struct urtwm_softc *sc, int chain,
 
 	if (IEEE80211_IS_CHAN_2GHZ(c)) {
 		/* Write per-CCK rate Tx power. */
-		urtwm_bb_write(sc, R88A_TXAGC_CCK11_1(chain),
-		    SM(R88A_TXAGC_CCK1,  power[URTWM_RIDX_CCK1]) |
-		    SM(R88A_TXAGC_CCK2,  power[URTWM_RIDX_CCK2]) |
-		    SM(R88A_TXAGC_CCK55, power[URTWM_RIDX_CCK55]) |
-		    SM(R88A_TXAGC_CCK11, power[URTWM_RIDX_CCK11]));
+		urtwm_bb_write(sc, R12A_TXAGC_CCK11_1(chain),
+		    SM(R12A_TXAGC_CCK1,  power[URTWM_RIDX_CCK1]) |
+		    SM(R12A_TXAGC_CCK2,  power[URTWM_RIDX_CCK2]) |
+		    SM(R12A_TXAGC_CCK55, power[URTWM_RIDX_CCK55]) |
+		    SM(R12A_TXAGC_CCK11, power[URTWM_RIDX_CCK11]));
 	}
 
 	/* Write per-OFDM rate Tx power. */
-	urtwm_bb_write(sc, R88A_TXAGC_OFDM18_6(chain),
-	    SM(R88A_TXAGC_OFDM06, power[URTWM_RIDX_OFDM6]) |
-	    SM(R88A_TXAGC_OFDM09, power[URTWM_RIDX_OFDM9]) |
-	    SM(R88A_TXAGC_OFDM12, power[URTWM_RIDX_OFDM12]) |
-	    SM(R88A_TXAGC_OFDM18, power[URTWM_RIDX_OFDM18]));
-	urtwm_bb_write(sc, R88A_TXAGC_OFDM54_24(chain),
-	    SM(R88A_TXAGC_OFDM24, power[URTWM_RIDX_OFDM24]) |
-	    SM(R88A_TXAGC_OFDM36, power[URTWM_RIDX_OFDM36]) |
-	    SM(R88A_TXAGC_OFDM48, power[URTWM_RIDX_OFDM48]) |
-	    SM(R88A_TXAGC_OFDM54, power[URTWM_RIDX_OFDM54]));
+	urtwm_bb_write(sc, R12A_TXAGC_OFDM18_6(chain),
+	    SM(R12A_TXAGC_OFDM06, power[URTWM_RIDX_OFDM6]) |
+	    SM(R12A_TXAGC_OFDM09, power[URTWM_RIDX_OFDM9]) |
+	    SM(R12A_TXAGC_OFDM12, power[URTWM_RIDX_OFDM12]) |
+	    SM(R12A_TXAGC_OFDM18, power[URTWM_RIDX_OFDM18]));
+	urtwm_bb_write(sc, R12A_TXAGC_OFDM54_24(chain),
+	    SM(R12A_TXAGC_OFDM24, power[URTWM_RIDX_OFDM24]) |
+	    SM(R12A_TXAGC_OFDM36, power[URTWM_RIDX_OFDM36]) |
+	    SM(R12A_TXAGC_OFDM48, power[URTWM_RIDX_OFDM48]) |
+	    SM(R12A_TXAGC_OFDM54, power[URTWM_RIDX_OFDM54]));
 
 	/* Write per-MCS Tx power. */
-	urtwm_bb_write(sc, R88A_TXAGC_MCS3_0(chain),
-	    SM(R88A_TXAGC_MCS0, power[URTWM_RIDX_MCS(0)]) |
-	    SM(R88A_TXAGC_MCS1, power[URTWM_RIDX_MCS(1)]) |
-	    SM(R88A_TXAGC_MCS2, power[URTWM_RIDX_MCS(2)]) |
-	    SM(R88A_TXAGC_MCS3, power[URTWM_RIDX_MCS(3)]));
-	urtwm_bb_write(sc, R88A_TXAGC_MCS7_4(chain),
-	    SM(R88A_TXAGC_MCS4, power[URTWM_RIDX_MCS(4)]) |
-	    SM(R88A_TXAGC_MCS5, power[URTWM_RIDX_MCS(5)]) |
-	    SM(R88A_TXAGC_MCS6, power[URTWM_RIDX_MCS(6)]) |
-	    SM(R88A_TXAGC_MCS7, power[URTWM_RIDX_MCS(7)]));
-	urtwm_bb_write(sc, R88A_TXAGC_MCS11_8(chain),
-	    SM(R88A_TXAGC_MCS8,  power[URTWM_RIDX_MCS(8)]) |
-	    SM(R88A_TXAGC_MCS9,  power[URTWM_RIDX_MCS(9)]) |
-	    SM(R88A_TXAGC_MCS10, power[URTWM_RIDX_MCS(10)]) |
-	    SM(R88A_TXAGC_MCS11, power[URTWM_RIDX_MCS(11)]));
-	urtwm_bb_write(sc, R88A_TXAGC_MCS15_12(chain),
-	    SM(R88A_TXAGC_MCS12, power[URTWM_RIDX_MCS(12)]) |
-	    SM(R88A_TXAGC_MCS13, power[URTWM_RIDX_MCS(13)]) |
-	    SM(R88A_TXAGC_MCS14, power[URTWM_RIDX_MCS(14)]) |
-	    SM(R88A_TXAGC_MCS15, power[URTWM_RIDX_MCS(15)]));
+	urtwm_bb_write(sc, R12A_TXAGC_MCS3_0(chain),
+	    SM(R12A_TXAGC_MCS0, power[URTWM_RIDX_MCS(0)]) |
+	    SM(R12A_TXAGC_MCS1, power[URTWM_RIDX_MCS(1)]) |
+	    SM(R12A_TXAGC_MCS2, power[URTWM_RIDX_MCS(2)]) |
+	    SM(R12A_TXAGC_MCS3, power[URTWM_RIDX_MCS(3)]));
+	urtwm_bb_write(sc, R12A_TXAGC_MCS7_4(chain),
+	    SM(R12A_TXAGC_MCS4, power[URTWM_RIDX_MCS(4)]) |
+	    SM(R12A_TXAGC_MCS5, power[URTWM_RIDX_MCS(5)]) |
+	    SM(R12A_TXAGC_MCS6, power[URTWM_RIDX_MCS(6)]) |
+	    SM(R12A_TXAGC_MCS7, power[URTWM_RIDX_MCS(7)]));
+	urtwm_bb_write(sc, R12A_TXAGC_MCS11_8(chain),
+	    SM(R12A_TXAGC_MCS8,  power[URTWM_RIDX_MCS(8)]) |
+	    SM(R12A_TXAGC_MCS9,  power[URTWM_RIDX_MCS(9)]) |
+	    SM(R12A_TXAGC_MCS10, power[URTWM_RIDX_MCS(10)]) |
+	    SM(R12A_TXAGC_MCS11, power[URTWM_RIDX_MCS(11)]));
+	urtwm_bb_write(sc, R12A_TXAGC_MCS15_12(chain),
+	    SM(R12A_TXAGC_MCS12, power[URTWM_RIDX_MCS(12)]) |
+	    SM(R12A_TXAGC_MCS13, power[URTWM_RIDX_MCS(13)]) |
+	    SM(R12A_TXAGC_MCS14, power[URTWM_RIDX_MCS(14)]) |
+	    SM(R12A_TXAGC_MCS15, power[URTWM_RIDX_MCS(15)]));
 
 	/* TODO: VHT rates */
 }
@@ -5684,19 +5684,19 @@ urtwm_fix_spur(struct urtwm_softc *sc, struct ieee80211_channel *c)
 
 	if (sc->chip & URTWM_CHIP_12A_C_CUT) {
 		if (IEEE80211_IS_CHAN_HT40(c) && chan == 11) {
-			urtwm_bb_setbits(sc, R88A_RFMOD, 0, 0xc00);
-			urtwm_bb_setbits(sc, R88A_ADC_BUF_CLK, 0, 0x40000000);
+			urtwm_bb_setbits(sc, R12A_RFMOD, 0, 0xc00);
+			urtwm_bb_setbits(sc, R12A_ADC_BUF_CLK, 0, 0x40000000);
 		} else {
-			urtwm_bb_setbits(sc, R88A_RFMOD, 0x400, 0x800);
+			urtwm_bb_setbits(sc, R12A_RFMOD, 0x400, 0x800);
 
 			if (!IEEE80211_IS_CHAN_HT40(c) &&	/* 20 MHz */
 			    (chan == 13 || chan == 14)) {
-				urtwm_bb_setbits(sc, R88A_RFMOD, 0, 0x300);
-				urtwm_bb_setbits(sc, R88A_ADC_BUF_CLK,
+				urtwm_bb_setbits(sc, R12A_RFMOD, 0, 0x300);
+				urtwm_bb_setbits(sc, R12A_ADC_BUF_CLK,
 				    0, 0x40000000);
 			} else {	/* !80 Mhz */
-				urtwm_bb_setbits(sc, R88A_RFMOD, 0x100, 0x200);
-				urtwm_bb_setbits(sc, R88A_ADC_BUF_CLK,
+				urtwm_bb_setbits(sc, R12A_RFMOD, 0x100, 0x200);
+				urtwm_bb_setbits(sc, R12A_ADC_BUF_CLK,
 				    0x40000000, 0);
 			}
 		}
@@ -5704,9 +5704,9 @@ urtwm_fix_spur(struct urtwm_softc *sc, struct ieee80211_channel *c)
 		/* Set ADC clock to 160M to resolve 2480 MHz spur. */
 		if (!IEEE80211_IS_CHAN_HT40(c) &&	/* 20 MHz */
 		    (chan == 13 || chan == 14))
-			urtwm_bb_setbits(sc, R88A_RFMOD, 0, 0x300);
+			urtwm_bb_setbits(sc, R12A_RFMOD, 0, 0x300);
 		else if (IEEE80211_IS_CHAN_2GHZ(c))
-			urtwm_bb_setbits(sc, R88A_RFMOD, 0x100, 0x200);
+			urtwm_bb_setbits(sc, R12A_RFMOD, 0x100, 0x200);
 	}
 }
 
@@ -5786,7 +5786,7 @@ urtwm_set_chan(struct urtwm_softc *sc, struct ieee80211_channel *c)
 	else
 		val = 0x12d40000;
 
-	urtwm_bb_setbits(sc, R88A_FC_AREA, 0x1ffe0000, val);
+	urtwm_bb_setbits(sc, R12A_FC_AREA, 0x1ffe0000, val);
 
 	for (i = 0; i < sc->nrxchains; i++) {
 		if (36 <= chan && chan <= 64)
@@ -5811,7 +5811,7 @@ urtwm_set_chan(struct urtwm_softc *sc, struct ieee80211_channel *c)
 
 #ifdef notyet
 	if (IEEE80211_IS_CHAN_HT80(c)) {	/* 80 MHz */
-		urtwm_setbits_2(sc, R88A_WMAC_TRXPTCL_CTL, 0x80, 0x100);
+		urtwm_setbits_2(sc, R12A_WMAC_TRXPTCL_CTL, 0x80, 0x100);
 
 		/* TODO */
 	} else
@@ -5820,24 +5820,24 @@ urtwm_set_chan(struct urtwm_softc *sc, struct ieee80211_channel *c)
 		uint8_t ext_chan;
 
 		if (IEEE80211_IS_CHAN_HT40U(c))
-			ext_chan = R88A_DATA_SEC_PRIM_DOWN_20;
+			ext_chan = R12A_DATA_SEC_PRIM_DOWN_20;
 		else
-			ext_chan = R88A_DATA_SEC_PRIM_UP_20;
+			ext_chan = R12A_DATA_SEC_PRIM_UP_20;
 
-		urtwm_setbits_2(sc, R88A_WMAC_TRXPTCL_CTL, 0x100, 0x80);
-		urtwm_write_1(sc, R88A_DATA_SEC, ext_chan);
+		urtwm_setbits_2(sc, R12A_WMAC_TRXPTCL_CTL, 0x100, 0x80);
+		urtwm_write_1(sc, R12A_DATA_SEC, ext_chan);
 
-		urtwm_bb_setbits(sc, R88A_RFMOD, 0x003003c3, 0x00300201);
-		urtwm_bb_setbits(sc, R88A_ADC_BUF_CLK, 0x40000000, 0);
+		urtwm_bb_setbits(sc, R12A_RFMOD, 0x003003c3, 0x00300201);
+		urtwm_bb_setbits(sc, R12A_ADC_BUF_CLK, 0x40000000, 0);
 
 		/* discard high 4 bits */
-		val = urtwm_bb_read(sc, R88A_RFMOD);
-		val = RW(val, R88A_RFMOD_EXT_CHAN, ext_chan);
-		urtwm_bb_write(sc, R88A_RFMOD, val);
+		val = urtwm_bb_read(sc, R12A_RFMOD);
+		val = RW(val, R12A_RFMOD_EXT_CHAN, ext_chan);
+		urtwm_bb_write(sc, R12A_RFMOD, val);
 
-		val = urtwm_bb_read(sc, R88A_CCA_ON_SEC);
-		val = RW(val, R88A_CCA_ON_SEC_EXT_CHAN, ext_chan);
-		urtwm_bb_write(sc, R88A_CCA_ON_SEC, val);
+		val = urtwm_bb_read(sc, R12A_CCA_ON_SEC);
+		val = RW(val, R12A_CCA_ON_SEC_EXT_CHAN, ext_chan);
+		urtwm_bb_write(sc, R12A_CCA_ON_SEC, val);
 
 		if (urtwm_read_1(sc, 0x837) & 0x04)
 			val = 0x01800000;
@@ -5846,7 +5846,7 @@ urtwm_set_chan(struct urtwm_softc *sc, struct ieee80211_channel *c)
 		else
 			val = 0x02000000;
 
-		urtwm_bb_setbits(sc, R88A_L1_PEAK_TH, 0x03c00000, val);
+		urtwm_bb_setbits(sc, R12A_L1_PEAK_TH, 0x03c00000, val);
 
 		if (IEEE80211_IS_CHAN_HT40U(c))
 			urtwm_bb_setbits(sc, R92C_CCK0_SYSTEM, 0x10, 0);
@@ -5859,18 +5859,18 @@ urtwm_set_chan(struct urtwm_softc *sc, struct ieee80211_channel *c)
 		for (i = 0; i < 2; i++)
 			urtwm_rf_setbits(sc, i, R92C_RF_CHNLBW, 0x800, 0x400);
 	} else {	/* 20 MHz */
-		urtwm_setbits_2(sc, R88A_WMAC_TRXPTCL_CTL, 0x180, 0);
-		urtwm_write_1(sc, R88A_DATA_SEC, R88A_DATA_SEC_NO_EXT);
+		urtwm_setbits_2(sc, R12A_WMAC_TRXPTCL_CTL, 0x180, 0);
+		urtwm_write_1(sc, R12A_DATA_SEC, R12A_DATA_SEC_NO_EXT);
 
-		urtwm_bb_setbits(sc, R88A_RFMOD, 0x003003c3, 0x00300200);
-		urtwm_bb_setbits(sc, R88A_ADC_BUF_CLK, 0x40000000, 0);
+		urtwm_bb_setbits(sc, R12A_RFMOD, 0x003003c3, 0x00300200);
+		urtwm_bb_setbits(sc, R12A_ADC_BUF_CLK, 0x40000000, 0);
 
 		if (sc->nrxchains == 2 && sc->ntxchains == 2)
 			val = 0x01c00000;
 		else
 			val = 0x02000000;
 
-		urtwm_bb_setbits(sc, R88A_L1_PEAK_TH, 0x03c00000, val);
+		urtwm_bb_setbits(sc, R12A_L1_PEAK_TH, 0x03c00000, val);
 
 		if (URTWM_CHIP_IS_12A(sc))
 			urtwm_fix_spur(sc, c);
@@ -5891,7 +5891,7 @@ urtwm_antsel_init(struct urtwm_softc *sc)
 	urtwm_write_1(sc, R92C_LEDCFG2, 0x82);
 	urtwm_bb_setbits(sc, R92C_FPGA0_RFPARAM(0), 0, 0x2000);
 	reg = urtwm_bb_read(sc, R92C_FPGA0_RFIFACEOE(0));
-	sc->sc_ant = MS(reg, R88A_FPGA0_RFIFACEOE0_ANT);
+	sc->sc_ant = MS(reg, R12A_FPGA0_RFIFACEOE0_ANT);
 }
 
 #ifdef URTWM_TODO
@@ -6035,10 +6035,10 @@ urtwm_init(struct urtwm_softc *sc)
 		    R92C_RF_CTRL_EN |
 		    R92C_RF_CTRL_RSTB |
 		    R92C_RF_CTRL_SDMRSTB);
-		urtwm_write_1(sc, R88A_RF_B_CTRL,
+		urtwm_write_1(sc, R12A_RF_B_CTRL,
 		    R92C_RF_CTRL_EN |
 		    R92C_RF_CTRL_SDMRSTB);
-		urtwm_write_1(sc, R88A_RF_B_CTRL,
+		urtwm_write_1(sc, R12A_RF_B_CTRL,
 		    R92C_RF_CTRL_EN |
 		    R92C_RF_CTRL_RSTB |
 		    R92C_RF_CTRL_SDMRSTB);
@@ -6119,7 +6119,7 @@ urtwm_init(struct urtwm_softc *sc)
 	} else {
 		urtwm_setbits_4(sc, R92C_TDECTRL,
 		    R92C_TDECTRL_BLK_DESC_NUM_M, 6);
-		urtwm_write_1(sc, R88A_DWBCN1_CTRL, (6 << 1));
+		urtwm_write_1(sc, R12A_DWBCN1_CTRL, (6 << 1));
 	}
 
 	/* Rx aggregation (DMA). */
@@ -6147,10 +6147,10 @@ urtwm_init(struct urtwm_softc *sc)
 
 	/* Setup AMPDU aggregation. */
 	if (URTWM_CHIP_IS_12A(sc))
-		urtwm_write_1(sc, R88A_AMPDU_MAX_TIME, 0x70);
+		urtwm_write_1(sc, R12A_AMPDU_MAX_TIME, 0x70);
 	else
-		urtwm_write_1(sc, R88A_AMPDU_MAX_TIME, 0x5e);
-	urtwm_write_4(sc, R88A_AMPDU_MAX_LENGTH, 0xffffffff);
+		urtwm_write_1(sc, R12A_AMPDU_MAX_TIME, 0x5e);
+	urtwm_write_4(sc, R12A_AMPDU_MAX_LENGTH, 0xffffffff);
 
 	/* 80 MHz clock (again?) */
 	urtwm_write_1(sc, R92C_USTIME_TSF, 0x50);
@@ -6160,23 +6160,23 @@ urtwm_init(struct urtwm_softc *sc)
 	    urtwm_read_1(sc, R92C_TYPE_ID + 3) & 0x80)	{
 		if ((urtwm_read_1(sc, R92C_USB_INFO) & 0x30) == 0) {
 			/* Set burst packet length to 512 B. */
-			urtwm_setbits_1(sc, R88A_RXDMA_PRO, 0x20, 0x10);
-			urtwm_write_2(sc, R88A_RXDMA_PRO, 0x1e);
+			urtwm_setbits_1(sc, R12A_RXDMA_PRO, 0x20, 0x10);
+			urtwm_write_2(sc, R12A_RXDMA_PRO, 0x1e);
 		} else {
 			/* Set burst packet length to 64 B. */
-			urtwm_setbits_1(sc, R88A_RXDMA_PRO, 0x10, 0x20);
+			urtwm_setbits_1(sc, R12A_RXDMA_PRO, 0x10, 0x20);
 		}
 	} else {	/* USB 3.0 */
 		/* Set burst packet length to 1 KB. */
-		urtwm_setbits_1(sc, R88A_RXDMA_PRO, 0x30, 0);
-		urtwm_write_2(sc, R88A_RXDMA_PRO, 0x0e);
+		urtwm_setbits_1(sc, R12A_RXDMA_PRO, 0x30, 0);
+		urtwm_write_2(sc, R12A_RXDMA_PRO, 0x0e);
 
 		urtwm_setbits_1(sc, 0xf008, 0x18, 0);
 	}
 
 	/* Enable single packet AMPDU. */
-	urtwm_setbits_1(sc, R88A_HT_SINGLE_AMPDU, 0,
-	    R88A_HT_SINGLE_AMPDU_PKT_ENA);
+	urtwm_setbits_1(sc, R12A_HT_SINGLE_AMPDU, 0,
+	    R12A_HT_SINGLE_AMPDU_PKT_ENA);
 
 	/* 11K packet length for VHT. */
 	urtwm_write_1(sc, R92C_RX_PKT_LIMIT, 0x18);
@@ -6236,13 +6236,13 @@ urtwm_init(struct urtwm_softc *sc)
 	/* Setup RTS BW (equal to data BW). */
 	urtwm_setbits_1(sc, R92C_QUEUE_CTRL, 0x08, 0);
 
-	urtwm_write_1(sc, R88A_EARLY_MODE_CONTROL + 3, 0x01);
+	urtwm_write_1(sc, R12A_EARLY_MODE_CONTROL + 3, 0x01);
 
 	/* Initialize MRR. */
 	urtwm_mrr_init(sc);
 
 	/* Reset USB mode switch setting. */
-	urtwm_write_1(sc, R88A_SDIO_CTRL, 0);
+	urtwm_write_1(sc, R12A_SDIO_CTRL, 0);
 	urtwm_write_1(sc, R92C_ACLK_MON, 0);
 
 #ifdef URTWM_TODO

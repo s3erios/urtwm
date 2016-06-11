@@ -22,7 +22,7 @@
 #define URTWM_HOST_CMD_RING_COUNT	32
 
 #define URTWM_RXBUFSZ	(8 * 1024)
-#define URTWM_TXBUFSZ	(sizeof(struct r88a_tx_desc) + IEEE80211_MAX_LEN)
+#define URTWM_TXBUFSZ	(sizeof(struct r12a_tx_desc) + IEEE80211_MAX_LEN)
 
 #define URTWM_TX_TIMEOUT	5000	/* ms */
 
@@ -93,7 +93,7 @@ struct urtwm_node {
 struct urtwm_vap {
 	struct ieee80211vap	vap;
 
-	struct r88a_tx_desc	bcn_desc;
+	struct r12a_tx_desc	bcn_desc;
 	struct mbuf		*bcn_mbuf;
 
 	struct callout		tsf_sync_adhoc;
@@ -197,7 +197,7 @@ struct urtwm_softc {
 	uint16_t		next_rom_addr;
 	uint32_t		keys_bmap;
 
-	struct ieee80211_node	*node_list[R8821A_MACID_MAX + 1];
+	struct ieee80211_node	*node_list[R21A_MACID_MAX + 1];
 	struct mtx		nt_mtx;
 
 	struct mtx		sc_mtx;
@@ -224,7 +224,7 @@ struct urtwm_softc {
 	int		(*sc_check_condition)(struct urtwm_softc *,
 			    const uint8_t[]);
 	void		(*sc_parse_rom)(struct urtwm_softc *,
-			    struct r88a_rom *);
+			    struct r12a_rom *);
 	void		(*sc_set_led)(struct urtwm_softc *, int, int);
 	int8_t		(*sc_get_rssi_cck)(struct urtwm_softc *, void *);
 	int		(*sc_power_on)(struct urtwm_softc *);

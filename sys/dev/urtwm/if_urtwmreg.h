@@ -26,17 +26,17 @@
 #define R92C_MAX_CHAINS	2
 
 /* Maximum number of output pipes is 4. */
-#define R88A_MAX_EPOUT	4
+#define R12A_MAX_EPOUT	4
 
 #define R92C_MAX_TX_PWR	0x3f
 
-#define R88A_PUBQ_NPAGES	219
-#define R88A_TXPKTBUF_COUNT	255
-#define R8812A_TX_PAGE_COUNT	248
-#define R8821A_TX_PAGE_COUNT	243
-#define R8812A_TX_PAGE_BOUNDARY	(R8812A_TX_PAGE_COUNT + 1)
-#define R8821A_TX_PAGE_BOUNDARY	(R8821A_TX_PAGE_COUNT + 1)
-#define R88A_RX_DMA_BUFFER_SIZE	0x3e80
+#define R12A_PUBQ_NPAGES	219
+#define R12A_TXPKTBUF_COUNT	255
+#define R12A_TX_PAGE_COUNT	248
+#define R21A_TX_PAGE_COUNT	243
+#define R12A_TX_PAGE_BOUNDARY	(R12A_TX_PAGE_COUNT + 1)
+#define R21A_TX_PAGE_BOUNDARY	(R21A_TX_PAGE_COUNT + 1)
+#define R12A_RX_DMA_BUFFER_SIZE	0x3e80
 
 #define R92C_H2C_NBOX		4
 
@@ -88,8 +88,8 @@
 #define R92C_HSIMR			0x058
 #define R92C_HSISR			0x05c
 #define R88E_BB_PAD_CTRL		0x064
-#define R88A_SDIO_CTRL			0x070
-#define R88A_RF_B_CTRL			0x076
+#define R12A_SDIO_CTRL			0x070
+#define R12A_RF_B_CTRL			0x076
 #define R92C_MCUFWDL			0x080
 #define R92C_HMEBOX_EXT(idx)		(0x088 + (idx) * 2)
 #define R88E_HIMR			0x0b0
@@ -145,19 +145,19 @@
 #define R92C_RQPN			0x200
 #define R92C_FIFOPAGE			0x204
 #define R92C_TDECTRL			0x208
-#define R88A_DWBCN0_CTRL		R92C_TDECTRL
+#define R12A_DWBCN0_CTRL		R92C_TDECTRL
 #define R92C_TXDMA_OFFSET_CHK		0x20c
 #define R92C_TXDMA_STATUS		0x210
 #define R92C_RQPN_NPQ			0x214
-#define R88A_DWBCN1_CTRL		0x228
+#define R12A_DWBCN1_CTRL		0x228
 /* Rx DMA Configuration. */
 #define R92C_RXDMA_AGG_PG_TH		0x280
 #define R92C_RXPKT_NUM			0x284
 #define R92C_RXDMA_STATUS		0x288
-#define R88A_RXDMA_PRO			0x290
-#define R88A_EARLY_MODE_CONTROL		0x2bc
+#define R12A_RXDMA_PRO			0x290
+#define R12A_EARLY_MODE_CONTROL		0x2bc
 /* Protocol Configuration. */
-#define R88A_TXPKT_EMPTY		0x41a
+#define R12A_TXPKT_EMPTY		0x41a
 #define R92C_FWHW_TXQ_CTRL		0x420
 #define R92C_HWSEQ_CTRL			0x423
 #define R92C_TXPKTBUF_BCNQ_BDNY		0x424
@@ -168,22 +168,22 @@
 #define R92C_RARFRC			0x438
 #define R92C_RRSR			0x440
 #define R92C_ARFR(i)			(0x444 + (i) * 4)
-#define R88A_ARFR_5G(i)			(0x444 + (i) * 8)
-#define R88A_CCK_CHECK			0x454
-#define R88A_AMPDU_MAX_TIME		0x456
+#define R12A_ARFR_5G(i)			(0x444 + (i) * 8)
+#define R12A_CCK_CHECK			0x454
+#define R12A_AMPDU_MAX_TIME		0x456
 #define R88E_TXPKTBUF_BCNQ1_BDNY	0x457
 #define R92C_AGGLEN_LMT			0x458
-#define R88A_AMPDU_MAX_LENGTH		R92C_AGGLEN_LMT
+#define R12A_AMPDU_MAX_LENGTH		R92C_AGGLEN_LMT
 #define R92C_AMPDU_MIN_SPACE		0x45c
 #define R92C_TXPKTBUF_WMAC_LBK_BF_HD	0x45d
 #define R92C_FAST_EDCA_CTRL		0x460
 #define R92C_RD_RESP_PKT_TH		0x463
 #define R92C_INIRTS_RATE_SEL		0x480
-#define R88A_DATA_SEC			0x483
+#define R12A_DATA_SEC			0x483
 #define R92C_INIDATA_RATE_SEL(macid)	(0x484 + (macid))
-#define R88A_ARFR_2G(i)			(0x48c + (i) * 8)
+#define R12A_ARFR_2G(i)			(0x48c + (i) * 8)
 #define R92C_QUEUE_CTRL			0x4c6
-#define R88A_HT_SINGLE_AMPDU		0x4c7
+#define R12A_HT_SINGLE_AMPDU		0x4c7
 #define R92C_MAX_AGGR_NUM		0x4ca
 #define R92C_BAR_MODE_CTRL		0x4cc
 #define R88E_TX_RPT_CTRL		0x4ec
@@ -249,7 +249,7 @@
 #define R92C_T2T_SIFS			0x63e
 #define R92C_ACKTO			0x640
 #define R92C_NAV_UPPER			0x652
-#define R88A_WMAC_TRXPTCL_CTL		0x668
+#define R12A_WMAC_TRXPTCL_CTL		0x668
 #define R92C_CAMCMD			0x670
 #define R92C_CAMWRITE			0x674
 #define R92C_CAMREAD			0x678
@@ -363,10 +363,10 @@
 #define R92C_AFE_PLL_CTRL_LPFEN		0x0020
 
 /* Bits for R92C_MAC_PHY_CTRL. */
-#define R8812A_MAC_PHY_CRYSTALCAP_M	0x7ff80000
-#define R8812A_MAC_PHY_CRYSTALCAP_S	19
-#define R8821A_MAC_PHY_CRYSTALCAP_M	0x00fff000
-#define R8821A_MAC_PHY_CRYSTALCAP_S	12
+#define R12A_MAC_PHY_CRYSTALCAP_M	0x7ff80000
+#define R12A_MAC_PHY_CRYSTALCAP_S	19
+#define R21A_MAC_PHY_CRYSTALCAP_M	0x00fff000
+#define R21A_MAC_PHY_CRYSTALCAP_S	12
 
 /* Bits for R92C_EFUSE_CTRL. */
 #define R92C_EFUSE_CTRL_DATA_M	0x000000ff
@@ -382,7 +382,7 @@
 #define R92C_LEDCFG0_DIS	0x08
 
 /* Bits for R92C_LEDCFG2. */
-#define R88A_LEDCFG2_ENA	0x20
+#define R12A_LEDCFG2_ENA	0x20
 
 /* Bits for R92C_MCUFWDL. */
 #define R92C_MCUFWDL_EN			0x00000001
@@ -517,8 +517,8 @@
 #define R92C_RQPN_PUBQ_S	16
 #define R92C_RQPN_LD		0x80000000
 
-/* Bits for R88A_DWBCN1_CTRL. */
-#define R88A_DWBCN1_CTRL_SEL_EN		0x02
+/* Bits for R12A_DWBCN1_CTRL. */
+#define R12A_DWBCN1_CTRL_SEL_EN		0x02
 
 /* Bits for R92C_TDECTRL. */
 #define R92C_TDECTRL_BLK_DESC_NUM_M	0x000000f0
@@ -552,20 +552,20 @@
 #define R92C_RRSR_RSC_UPSUBCHNL		0x00400000
 #define R92C_RRSR_SHORT			0x00800000
 
-/* Bits for R88A_CCK_CHECK. */
-#define R88A_CCK_CHECK_5GHZ		0x80
+/* Bits for R12A_CCK_CHECK. */
+#define R12A_CCK_CHECK_5GHZ		0x80
 
-/* Bits for R88A_DATA_SEC. */
-#define R88A_DATA_SEC_NO_EXT		0x00
-#define R88A_DATA_SEC_PRIM_UP_20	0x01
-#define R88A_DATA_SEC_PRIM_DOWN_20	0x02
-#define R88A_DATA_SEC_PRIM_UPPER_20	0x03
-#define R88A_DATA_SEC_PRIM_LOWER_20	0x04
-#define R88A_DATA_SEC_PRIM_UP_40	0x90
-#define R88A_DATA_SEC_PRIM_DOWN_40	0xa0
+/* Bits for R12A_DATA_SEC. */
+#define R12A_DATA_SEC_NO_EXT		0x00
+#define R12A_DATA_SEC_PRIM_UP_20	0x01
+#define R12A_DATA_SEC_PRIM_DOWN_20	0x02
+#define R12A_DATA_SEC_PRIM_UPPER_20	0x03
+#define R12A_DATA_SEC_PRIM_LOWER_20	0x04
+#define R12A_DATA_SEC_PRIM_UP_40	0x90
+#define R12A_DATA_SEC_PRIM_DOWN_40	0xa0
 
-/* Bits for R88A_HT_SINGLE_AMPDU. */
-#define R88A_HT_SINGLE_AMPDU_PKT_ENA	0x80
+/* Bits for R12A_HT_SINGLE_AMPDU. */
+#define R12A_HT_SINGLE_AMPDU_PKT_ENA	0x80
 
 /* Bits for R88E_TX_RPT_CTRL. */
 #define R88E_TX_RPT1_ENA		0x01
@@ -682,162 +682,162 @@
 /*
  * Baseband registers.
  */
-#define R88A_CCK_RPT_FORMAT		0x804
-#define R88A_OFDMCCK_EN			0x808
-#define R88A_RX_PATH			R88A_OFDMCCK_EN
-#define R88A_TX_PATH			0x80c
-#define R88A_TXAGC_TABLE_SELECT		0x82c
-#define R88A_PWED_TH			0x830
-#define R88A_BW_INDICATION		0x834
-#define R88A_CCA_ON_SEC			0x838
-#define R88A_L1_PEAK_TH			0x848
-#define R88A_FC_AREA			0x860
+#define R12A_CCK_RPT_FORMAT		0x804
+#define R12A_OFDMCCK_EN			0x808
+#define R12A_RX_PATH			R12A_OFDMCCK_EN
+#define R12A_TX_PATH			0x80c
+#define R12A_TXAGC_TABLE_SELECT		0x82c
+#define R12A_PWED_TH			0x830
+#define R12A_BW_INDICATION		0x834
+#define R12A_CCA_ON_SEC			0x838
+#define R12A_L1_PEAK_TH			0x848
+#define R12A_FC_AREA			0x860
 #define R92C_FPGA0_RFIFACEOE(chain)	(0x860 + (chain) * 4)
 #define R92C_FPGA0_RFPARAM(idx)		(0x878 + (idx) * 4)
-#define R88A_RFMOD			0x8ac
-#define R88A_HSSI_PARAM2		0x8b0
-#define R88A_ADC_BUF_CLK		0x8c4
-#define R88A_ANTSEL_SW			0x900
+#define R12A_RFMOD			0x8ac
+#define R12A_HSSI_PARAM2		0x8b0
+#define R12A_ADC_BUF_CLK		0x8c4
+#define R12A_ANTSEL_SW			0x900
 #define R92C_CCK0_SYSTEM		0xa00
-#define R88A_CCK_RX_PATH		0xa04
-#define R88A_HSSI_PARAM1(chain)		(0xc00 + (chain) * 0x200)
-#define R88A_TX_SCALE(chain)		(0xc1c + (chain) * 0x200)
-#define R88A_TXAGC_CCK11_1(chain)	(0xc20 + (chain) * 0x200)
-#define R88A_TXAGC_OFDM18_6(chain)	(0xc24 + (chain) * 0x200)
-#define R88A_TXAGC_OFDM54_24(chain)	(0xc28 + (chain) * 0x200)
-#define R88A_TXAGC_MCS3_0(chain)	(0xc2c + (chain) * 0x200)
-#define R88A_TXAGC_MCS7_4(chain)	(0xc30 + (chain) * 0x200)
-#define R88A_TXAGC_MCS11_8(chain)	(0xc34 + (chain) * 0x200)
-#define R88A_TXAGC_MCS15_12(chain)	(0xc38 + (chain) * 0x200)
-#define R88A_TXAGC_NSS1IX3_1IX0(chain)	(0xc3c + (chain) * 0x200)
-#define R88A_TXAGC_NSS1IX7_1IX4(chain)	(0xc40 + (chain) * 0x200)
-#define R88A_TXAGC_NSS2IX1_1IX8(chain)	(0xc44 + (chain) * 0x200)
-#define R88A_TXAGC_NSS2IX5_2IX2(chain)	(0xc48 + (chain) * 0x200)
-#define R88A_TXAGC_NSS2IX9_2IX6(chain)	(0xc4c + (chain) * 0x200)
-#define R88A_INITIAL_GAIN(chain)	(0xc50 + (chain) * 0x200)
-#define R88A_AFE_POWER_1(chain)		(0xc60 + (chain) * 0x200)
-#define R88A_AFE_POWER_2(chain)		(0xc64 + (chain) * 0x200)
+#define R12A_CCK_RX_PATH		0xa04
+#define R12A_HSSI_PARAM1(chain)		(0xc00 + (chain) * 0x200)
+#define R12A_TX_SCALE(chain)		(0xc1c + (chain) * 0x200)
+#define R12A_TXAGC_CCK11_1(chain)	(0xc20 + (chain) * 0x200)
+#define R12A_TXAGC_OFDM18_6(chain)	(0xc24 + (chain) * 0x200)
+#define R12A_TXAGC_OFDM54_24(chain)	(0xc28 + (chain) * 0x200)
+#define R12A_TXAGC_MCS3_0(chain)	(0xc2c + (chain) * 0x200)
+#define R12A_TXAGC_MCS7_4(chain)	(0xc30 + (chain) * 0x200)
+#define R12A_TXAGC_MCS11_8(chain)	(0xc34 + (chain) * 0x200)
+#define R12A_TXAGC_MCS15_12(chain)	(0xc38 + (chain) * 0x200)
+#define R12A_TXAGC_NSS1IX3_1IX0(chain)	(0xc3c + (chain) * 0x200)
+#define R12A_TXAGC_NSS1IX7_1IX4(chain)	(0xc40 + (chain) * 0x200)
+#define R12A_TXAGC_NSS2IX1_1IX8(chain)	(0xc44 + (chain) * 0x200)
+#define R12A_TXAGC_NSS2IX5_2IX2(chain)	(0xc48 + (chain) * 0x200)
+#define R12A_TXAGC_NSS2IX9_2IX6(chain)	(0xc4c + (chain) * 0x200)
+#define R12A_INITIAL_GAIN(chain)	(0xc50 + (chain) * 0x200)
+#define R12A_AFE_POWER_1(chain)		(0xc60 + (chain) * 0x200)
+#define R12A_AFE_POWER_2(chain)		(0xc64 + (chain) * 0x200)
 #define R92C_OFDM0_AGCCORE1(chain)	(0xc50 + (chain) * 8)
-#define R88A_LSSI_PARAM(chain)		(0xc90 + (chain) * 0x200)
-#define R88A_RFE_PINMUX(chain)		(0xcb0 + (chain) * 0x200)
-#define R88A_RFE_INV(chain)		(0xcb4 + (chain) * 0x200)
-#define R88A_HSPI_READBACK(chain)	(0xd04 + (chain) * 0x40)
-#define R88A_LSSI_READBACK(chain)	(0xd08 + (chain) * 0x40)
+#define R12A_LSSI_PARAM(chain)		(0xc90 + (chain) * 0x200)
+#define R12A_RFE_PINMUX(chain)		(0xcb0 + (chain) * 0x200)
+#define R12A_RFE_INV(chain)		(0xcb4 + (chain) * 0x200)
+#define R12A_HSPI_READBACK(chain)	(0xd04 + (chain) * 0x40)
+#define R12A_LSSI_READBACK(chain)	(0xd08 + (chain) * 0x40)
 
-/* Bits for R88A_CCK_RPT_FORMAT. */
-#define R88A_CCK_RPT_FORMAT_HIPWR	0x00010000
+/* Bits for R12A_CCK_RPT_FORMAT. */
+#define R12A_CCK_RPT_FORMAT_HIPWR	0x00010000
 
-/* Bits for R88A_OFDMCCK_EN. */
-#define R88A_OFDMCCK_EN_CCK	0x10000000
-#define R88A_OFDMCCK_EN_OFDM	0x20000000
+/* Bits for R12A_OFDMCCK_EN. */
+#define R12A_OFDMCCK_EN_CCK	0x10000000
+#define R12A_OFDMCCK_EN_OFDM	0x20000000
 
-/* Bits for R88A_CCA_ON_SEC. */
-#define R88A_CCA_ON_SEC_EXT_CHAN_M	0xf0000000
-#define R88A_CCA_ON_SEC_EXT_CHAN_S	28
+/* Bits for R12A_CCA_ON_SEC. */
+#define R12A_CCA_ON_SEC_EXT_CHAN_M	0xf0000000
+#define R12A_CCA_ON_SEC_EXT_CHAN_S	28
 
-/* Bits for R88A_RFE_PINMUX(i). */
-#define R88A_RFE_PINMUX_PA_A_MASK	0x000000f0
-#define R88A_RFE_PINMUX_LNA_MASK	0x0000f000
+/* Bits for R12A_RFE_PINMUX(i). */
+#define R12A_RFE_PINMUX_PA_A_MASK	0x000000f0
+#define R12A_RFE_PINMUX_LNA_MASK	0x0000f000
 
 /* Bits for R92C_FPGA0_RFIFACEOE(0). */
-#define R88A_FPGA0_RFIFACEOE0_ANT_M	0x00000300
-#define R88A_FPGA0_RFIFACEOE0_ANT_S	8
+#define R12A_FPGA0_RFIFACEOE0_ANT_M	0x00000300
+#define R12A_FPGA0_RFIFACEOE0_ANT_S	8
 
-/* Bits for R88A_RFMOD. */
-#define R88A_RFMOD_EXT_CHAN_M		0x3C
-#define R88A_RFMOD_EXT_CHAN_S		2
+/* Bits for R12A_RFMOD. */
+#define R12A_RFMOD_EXT_CHAN_M		0x3C
+#define R12A_RFMOD_EXT_CHAN_S		2
 
-/* Bits for R88A_HSSI_PARAM2. */
-#define R88A_HSSI_PARAM2_READ_ADDR_MASK	0xff
+/* Bits for R12A_HSSI_PARAM2. */
+#define R12A_HSSI_PARAM2_READ_ADDR_MASK	0xff
 
-/* Bits for R88A_HSSI_PARAM1(i). */
-#define R88A_HSSI_PARAM1_PI		0x00000004
+/* Bits for R12A_HSSI_PARAM1(i). */
+#define R12A_HSSI_PARAM1_PI		0x00000004
 
-/* Bits for R88A_TX_SCALE(i). */
-#define R88A_TX_SCALE_SWING_M		0xffe00000
-#define R88A_TX_SCALE_SWING_S		21
+/* Bits for R12A_TX_SCALE(i). */
+#define R12A_TX_SCALE_SWING_M		0xffe00000
+#define R12A_TX_SCALE_SWING_S		21
 
-/* Bits for R88A_TXAGC_CCK11_1(i). */
-#define R88A_TXAGC_CCK1_M		0x000000ff
-#define R88A_TXAGC_CCK1_S		0
-#define R88A_TXAGC_CCK2_M		0x0000ff00
-#define R88A_TXAGC_CCK2_S		8
-#define R88A_TXAGC_CCK55_M		0x00ff0000
-#define R88A_TXAGC_CCK55_S		16
-#define R88A_TXAGC_CCK11_M		0xff000000
-#define R88A_TXAGC_CCK11_S		24
+/* Bits for R12A_TXAGC_CCK11_1(i). */
+#define R12A_TXAGC_CCK1_M		0x000000ff
+#define R12A_TXAGC_CCK1_S		0
+#define R12A_TXAGC_CCK2_M		0x0000ff00
+#define R12A_TXAGC_CCK2_S		8
+#define R12A_TXAGC_CCK55_M		0x00ff0000
+#define R12A_TXAGC_CCK55_S		16
+#define R12A_TXAGC_CCK11_M		0xff000000
+#define R12A_TXAGC_CCK11_S		24
 
-/* Bits for R88A_TXAGC_OFDM18_6(i). */
-#define R88A_TXAGC_OFDM06_M		0x000000ff
-#define R88A_TXAGC_OFDM06_S		0
-#define R88A_TXAGC_OFDM09_M		0x0000ff00
-#define R88A_TXAGC_OFDM09_S		8
-#define R88A_TXAGC_OFDM12_M		0x00ff0000
-#define R88A_TXAGC_OFDM12_S		16
-#define R88A_TXAGC_OFDM18_M		0xff000000
-#define R88A_TXAGC_OFDM18_S		24
+/* Bits for R12A_TXAGC_OFDM18_6(i). */
+#define R12A_TXAGC_OFDM06_M		0x000000ff
+#define R12A_TXAGC_OFDM06_S		0
+#define R12A_TXAGC_OFDM09_M		0x0000ff00
+#define R12A_TXAGC_OFDM09_S		8
+#define R12A_TXAGC_OFDM12_M		0x00ff0000
+#define R12A_TXAGC_OFDM12_S		16
+#define R12A_TXAGC_OFDM18_M		0xff000000
+#define R12A_TXAGC_OFDM18_S		24
 
-/* Bits for R88A_TXAGC_OFDM54_24(i). */
-#define R88A_TXAGC_OFDM24_M		0x000000ff
-#define R88A_TXAGC_OFDM24_S		0
-#define R88A_TXAGC_OFDM36_M		0x0000ff00
-#define R88A_TXAGC_OFDM36_S		8
-#define R88A_TXAGC_OFDM48_M		0x00ff0000
-#define R88A_TXAGC_OFDM48_S		16
-#define R88A_TXAGC_OFDM54_M		0xff000000
-#define R88A_TXAGC_OFDM54_S		24
+/* Bits for R12A_TXAGC_OFDM54_24(i). */
+#define R12A_TXAGC_OFDM24_M		0x000000ff
+#define R12A_TXAGC_OFDM24_S		0
+#define R12A_TXAGC_OFDM36_M		0x0000ff00
+#define R12A_TXAGC_OFDM36_S		8
+#define R12A_TXAGC_OFDM48_M		0x00ff0000
+#define R12A_TXAGC_OFDM48_S		16
+#define R12A_TXAGC_OFDM54_M		0xff000000
+#define R12A_TXAGC_OFDM54_S		24
 
-/* Bits for R88A_TXAGC_MCS3_0(i). */
-#define R88A_TXAGC_MCS0_M		0x000000ff
-#define R88A_TXAGC_MCS0_S		0
-#define R88A_TXAGC_MCS1_M		0x0000ff00
-#define R88A_TXAGC_MCS1_S		8
-#define R88A_TXAGC_MCS2_M		0x00ff0000
-#define R88A_TXAGC_MCS2_S		16
-#define R88A_TXAGC_MCS3_M		0xff000000
-#define R88A_TXAGC_MCS3_S		24
+/* Bits for R12A_TXAGC_MCS3_0(i). */
+#define R12A_TXAGC_MCS0_M		0x000000ff
+#define R12A_TXAGC_MCS0_S		0
+#define R12A_TXAGC_MCS1_M		0x0000ff00
+#define R12A_TXAGC_MCS1_S		8
+#define R12A_TXAGC_MCS2_M		0x00ff0000
+#define R12A_TXAGC_MCS2_S		16
+#define R12A_TXAGC_MCS3_M		0xff000000
+#define R12A_TXAGC_MCS3_S		24
 
-/* Bits for R88A_TXAGC_MCS7_4(i). */
-#define R88A_TXAGC_MCS4_M		0x000000ff
-#define R88A_TXAGC_MCS4_S		0
-#define R88A_TXAGC_MCS5_M		0x0000ff00
-#define R88A_TXAGC_MCS5_S		8
-#define R88A_TXAGC_MCS6_M		0x00ff0000
-#define R88A_TXAGC_MCS6_S		16
-#define R88A_TXAGC_MCS7_M		0xff000000
-#define R88A_TXAGC_MCS7_S		24
+/* Bits for R12A_TXAGC_MCS7_4(i). */
+#define R12A_TXAGC_MCS4_M		0x000000ff
+#define R12A_TXAGC_MCS4_S		0
+#define R12A_TXAGC_MCS5_M		0x0000ff00
+#define R12A_TXAGC_MCS5_S		8
+#define R12A_TXAGC_MCS6_M		0x00ff0000
+#define R12A_TXAGC_MCS6_S		16
+#define R12A_TXAGC_MCS7_M		0xff000000
+#define R12A_TXAGC_MCS7_S		24
 
-/* Bits for R88A_TXAGC_MCS11_8(i). */
-#define R88A_TXAGC_MCS8_M		0x000000ff
-#define R88A_TXAGC_MCS8_S		0
-#define R88A_TXAGC_MCS9_M		0x0000ff00
-#define R88A_TXAGC_MCS9_S		8
-#define R88A_TXAGC_MCS10_M		0x00ff0000
-#define R88A_TXAGC_MCS10_S		16
-#define R88A_TXAGC_MCS11_M		0xff000000
-#define R88A_TXAGC_MCS11_S		24
+/* Bits for R12A_TXAGC_MCS11_8(i). */
+#define R12A_TXAGC_MCS8_M		0x000000ff
+#define R12A_TXAGC_MCS8_S		0
+#define R12A_TXAGC_MCS9_M		0x0000ff00
+#define R12A_TXAGC_MCS9_S		8
+#define R12A_TXAGC_MCS10_M		0x00ff0000
+#define R12A_TXAGC_MCS10_S		16
+#define R12A_TXAGC_MCS11_M		0xff000000
+#define R12A_TXAGC_MCS11_S		24
 
-/* Bits for R88A_TXAGC_MCS15_12(i). */
-#define R88A_TXAGC_MCS12_M		0x000000ff
-#define R88A_TXAGC_MCS12_S		0
-#define R88A_TXAGC_MCS13_M		0x0000ff00
-#define R88A_TXAGC_MCS13_S		8
-#define R88A_TXAGC_MCS14_M		0x00ff0000
-#define R88A_TXAGC_MCS14_S		16
-#define R88A_TXAGC_MCS15_M		0xff000000
-#define R88A_TXAGC_MCS15_S		24
+/* Bits for R12A_TXAGC_MCS15_12(i). */
+#define R12A_TXAGC_MCS12_M		0x000000ff
+#define R12A_TXAGC_MCS12_S		0
+#define R12A_TXAGC_MCS13_M		0x0000ff00
+#define R12A_TXAGC_MCS13_S		8
+#define R12A_TXAGC_MCS14_M		0x00ff0000
+#define R12A_TXAGC_MCS14_S		16
+#define R12A_TXAGC_MCS15_M		0xff000000
+#define R12A_TXAGC_MCS15_S		24
 
 /* Bits for R92C_OFDM0_AGCCORE1(i). */
 #define R92C_OFDM0_AGCCORE1_GAIN_M	0x0000007f
 #define R92C_OFDM0_AGCCORE1_GAIN_S	0
 
-/* Bits for R88A_LSSI_PARAM(i). */
+/* Bits for R12A_LSSI_PARAM(i). */
 #define R92C_LSSI_PARAM_DATA_M		0x000fffff
 #define R92C_LSSI_PARAM_DATA_S		0
 #define R88E_LSSI_PARAM_ADDR_M		0x0ff00000
 #define R88E_LSSI_PARAM_ADDR_S		20
 
-/* Bits for R88A_LSSI_READBACK(i). */
+/* Bits for R12A_LSSI_READBACK(i). */
 #define R92C_LSSI_READBACK_DATA_M	0x000fffff
 #define R92C_LSSI_READBACK_DATA_S	0
 
@@ -961,19 +961,19 @@
 #define R92C_CAM_MACLO_S	16
 
 /* Rate adaptation modes. */
-#define R88A_RAID_11BGN_2_40	0
-#define R88A_RAID_11BGN_1_40	1
-#define R88A_RAID_11BGN_2	2
-#define R88A_RAID_11BGN_1	3
-#define R88A_RAID_11GN_2	4
-#define R88A_RAID_11GN_1	5
-#define R88A_RAID_11BG		6
-#define R88A_RAID_11G		7	/* "pure" 11g */
-#define R88A_RAID_11B		8
-#define R88A_RAID_11AC_2_80	9
-#define R88A_RAID_11AC_1_80	10
-#define R88A_RAID_11AC_1	11
-#define R88A_RAID_11AC_2	12
+#define R12A_RAID_11BGN_2_40	0
+#define R12A_RAID_11BGN_1_40	1
+#define R12A_RAID_11BGN_2	2
+#define R12A_RAID_11BGN_1	3
+#define R12A_RAID_11GN_2	4
+#define R12A_RAID_11GN_1	5
+#define R12A_RAID_11BG		6
+#define R12A_RAID_11G		7	/* "pure" 11g */
+#define R12A_RAID_11B		8
+#define R12A_RAID_11AC_2_80	9
+#define R12A_RAID_11AC_1_80	10
+#define R12A_RAID_11AC_1	11
+#define R12A_RAID_11AC_2	12
 
 
 /*
@@ -1016,7 +1016,7 @@ struct r92c_fw_hdr {
 	uint32_t	reserved5;
 } __packed;
 
-#define R88A_MAX_FW_SIZE		0x8000
+#define R12A_MAX_FW_SIZE		0x8000
 
 /*
  * Host to firmware commands.
@@ -1024,12 +1024,12 @@ struct r92c_fw_hdr {
 struct r88e_fw_cmd {
 	uint8_t id;
 #define R88E_CMD_MACID_CONFIG		0x40
-#define R88A_CMD_IQ_CALIBRATE		0x45
+#define R12A_CMD_IQ_CALIBRATE		0x45
 
 	uint8_t msg[7];
 } __packed;
 
-/* Structure for R88A_CMD_MACID_CONFIG. */
+/* Structure for R12A_CMD_MACID_CONFIG. */
 #ifdef URTWM_TODO
 struct r92c_fw_cmd_macid_cfg {
 	uint32_t	mask;
@@ -1037,17 +1037,17 @@ struct r92c_fw_cmd_macid_cfg {
 #endif
 #define URTWM_MACID_BC		1	/* Broadcast. */
 #define URTWM_MACID_BSS		0
-#define R8812A_MACID_MAX	31
-#define R8821A_MACID_MAX	63
-#define URTWM_MACID_MAX(sc)	R8821A_MACID_MAX	/* XXX */
+#define R12A_MACID_MAX	31
+#define R21A_MACID_MAX	63
+#define URTWM_MACID_MAX(sc)	R21A_MACID_MAX	/* XXX */
 #define URTWM_MACID_UNDEFINED	(uint8_t)-1
 #define URTWM_MACID_VALID	0x80
 #ifdef URTWM_TODO
 } __packed;
 #endif
 
-/* Structure for R88A_CMD_IQ_CALIBRATE. */
-struct r88a_fw_cmd_iq_calib {
+/* Structure for R12A_CMD_IQ_CALIBRATE. */
+struct r12a_fw_cmd_iq_calib {
 	uint8_t		chan;
 	uint8_t		band_bw;
 #define URTWM_CMD_IQ_CHAN_WIDTH_20	0x01
@@ -1072,12 +1072,12 @@ struct r88a_fw_cmd_iq_calib {
 #define URTWM_DEF_TX_PWR_2G	0x2d
 #define URTWM_DEF_TX_PWR_5G	0xfe
 
-struct r88a_tx_pwr_2g {
+struct r12a_tx_pwr_2g {
 	uint8_t		cck[URTWM_MAX_GROUP_2G];
 	uint8_t		ht40[URTWM_MAX_GROUP_2G - 1];
 } __packed;
 
-struct r88a_tx_pwr_diff_2g {
+struct r12a_tx_pwr_diff_2g {
 	uint8_t		ht20_ofdm;
 #define LOW_PART_M	0x0f
 #define LOW_PART_S	0
@@ -1090,50 +1090,50 @@ struct r88a_tx_pwr_diff_2g {
 	} __packed	diff123[URTWM_MAX_TX_COUNT - 1];
 } __packed;
 
-struct r88a_tx_pwr_5g {
+struct r12a_tx_pwr_5g {
 	uint8_t		ht40[URTWM_MAX_GROUP_5G];
 } __packed;
 
-struct r88a_tx_pwr_diff_5g {
+struct r12a_tx_pwr_diff_5g {
 	uint8_t		ht20_ofdm;
 	uint8_t		ht40_ht20[URTWM_MAX_TX_COUNT - 1];
 	uint8_t		ofdm_ofdm[2];
 	uint8_t		ht80_ht160[URTWM_MAX_TX_COUNT];
 } __packed;
 
-struct r88a_tx_pwr {
-	struct r88a_tx_pwr_2g		pwr_2g;
-	struct r88a_tx_pwr_diff_2g	pwr_diff_2g;
-	struct r88a_tx_pwr_5g		pwr_5g;
-	struct r88a_tx_pwr_diff_5g	pwr_diff_5g;
+struct r12a_tx_pwr {
+	struct r12a_tx_pwr_2g		pwr_2g;
+	struct r12a_tx_pwr_diff_2g	pwr_diff_2g;
+	struct r12a_tx_pwr_5g		pwr_5g;
+	struct r12a_tx_pwr_diff_5g	pwr_diff_5g;
 } __packed;
 
 /*
  * RTL8812AU/RTL8821AU ROM image.
  */
-struct r88a_rom {
+struct r12a_rom {
 	uint8_t			reserved1[16];
-	struct r88a_tx_pwr	tx_pwr[URTWM_MAX_RF_PATH];
+	struct r12a_tx_pwr	tx_pwr[URTWM_MAX_RF_PATH];
 	uint8_t			channel_plan;
 	uint8_t			crystalcap;
-#define R88A_ROM_CRYSTALCAP_DEF		0x20
+#define R12A_ROM_CRYSTALCAP_DEF		0x20
 
 	uint8_t			thermal_meter;
 	uint8_t			iqk_lck;
 	uint8_t			pa_type;
-#define R8812A_ROM_IS_PA_EXT_2GHZ(pa_type)	(((pa_type) & 0x30) == 0x30)
-#define R8812A_ROM_IS_PA_EXT_5GHZ(pa_type)	(((pa_type) & 0x03) == 0x03)
-#define R8821A_ROM_IS_PA_EXT_2GHZ(pa_type)	(((pa_type) & 0x10) == 0x10)
-#define R8821A_ROM_IS_PA_EXT_5GHZ(pa_type)	(((pa_type) & 0x01) == 0x01)
+#define R12A_ROM_IS_PA_EXT_2GHZ(pa_type)	(((pa_type) & 0x30) == 0x30)
+#define R12A_ROM_IS_PA_EXT_5GHZ(pa_type)	(((pa_type) & 0x03) == 0x03)
+#define R21A_ROM_IS_PA_EXT_2GHZ(pa_type)	(((pa_type) & 0x10) == 0x10)
+#define R21A_ROM_IS_PA_EXT_5GHZ(pa_type)	(((pa_type) & 0x01) == 0x01)
 
 	uint8_t			lna_type_2g;
-#define R8812A_ROM_IS_LNA_EXT(lna_type)		(((lna_type) & 0x88) == 0x88)
-#define R8821A_ROM_IS_LNA_EXT(lna_type)		(((lna_type) & 0x08) == 0x08)
+#define R12A_ROM_IS_LNA_EXT(lna_type)		(((lna_type) & 0x88) == 0x88)
+#define R21A_ROM_IS_LNA_EXT(lna_type)		(((lna_type) & 0x08) == 0x08)
 
 /* XXX */
-#define R8812A_GET_ROM_PA_TYPE(lna_type, chain)		\
+#define R12A_GET_ROM_PA_TYPE(lna_type, chain)		\
 	(((lna_type) >> ((chain) * 4 + 2)) & 0x01)
-#define R8812A_GET_ROM_LNA_TYPE(lna_type, chain)	\
+#define R12A_GET_ROM_LNA_TYPE(lna_type, chain)	\
 	(((lna_type) >> ((chain) * 4)) & 0x03)
 
 	uint8_t			reserved2;
@@ -1149,7 +1149,7 @@ struct r88a_rom {
 #define R92C_BOARD_TYPE_MINICARD	2
 #define R92C_BOARD_TYPE_SOLO		3
 #define R92C_BOARD_TYPE_COMBO		4
-#define R88A_BOARD_TYPE_COMBO_MF	5
+#define R12A_BOARD_TYPE_COMBO_MF	5
 
 	uint8_t			rf_feature_opt;
 	uint8_t			rf_bt_opt;
@@ -1206,7 +1206,7 @@ struct r92c_rx_stat {
 	uint32_t	rxdw2;
 #define R92C_RXDW2_PKTCNT_M	0x00ff0000
 #define R92C_RXDW2_PKTCNT_S	16
-#define R88A_RXDW2_RPT_C2H	0x10000000
+#define R12A_RXDW2_RPT_C2H	0x10000000
 
 	uint32_t	rxdw3;
 #define R92C_RXDW3_RATE_M	0x0000003f
@@ -1225,16 +1225,17 @@ struct r92c_rx_stat {
 
 /* Rx PHY descriptor. */
 #ifdef R92C_RX_DRVINFO_SZ_DEF
-struct r88a_rx_phystat {
+struct r12a_rx_phystat {
 #if R92C_RX_DRVINFO_SZ_DEF > 0
 	uint8_t		gain_trsw[2];
 	uint16_t	phyw1;
-#define R88A_PHYW1_CHAN_M	0x03ff
-#define R88A_PHYW1_CHAN_S	0
-#define R88A_PHYW1_CHAN_EXT_M	0x3c00
-#define R88A_PHYW1_CHAN_EXT_S	10
-#define R88A_PHYW1_RFMOD_M	0xc000
-#define R88A_PHYW1_RFMOD_S	14
+#define R12A_PHYW1_CHAN_M	0x03ff
+#define R12A_PHYW1_CHAN_S	0
+#define R12A_PHYW1_CHAN_EXT_M	0x3c00
+#define R12A_PHYW1_CHAN_EXT_S	10
+#define R12A_PHYW1_RFMOD_M	0xc000
+#define R12A_PHYW1_RFMOD_S	14
+
 	uint8_t		pwdb_all;
 	uint8_t		cfosho[4];
 #endif
@@ -1253,137 +1254,137 @@ struct r88a_rx_phystat {
 	uint8_t		rx_gain_d;
 	uint8_t		sigevm;
 	uint16_t	phyw13;
-#define R88A_PHYW13_ANTIDX_A_M	0x0700
-#define R88A_PHYW13_ANTIDX_A_S	8
-#define R88A_PHYW13_ANTIDX_B_M	0x3800
-#define R88A_PHYW13_ANTIDX_B_S	11
+#define R12A_PHYW13_ANTIDX_A_M	0x0700
+#define R12A_PHYW13_ANTIDX_A_S	8
+#define R12A_PHYW13_ANTIDX_B_M	0x3800
+#define R12A_PHYW13_ANTIDX_B_S	11
 #endif
 } __packed;
 #endif
 
 /* C2H event types. */
-#define R88A_C2H_DEBUG		0x00
-#define R88A_C2H_TX_REPORT	0x03
-#define R88A_C2H_BT_INFO	0x09
-#define R88A_C2H_RA_REPORT	0x0c
-#define R88A_C2H_IQK_FINISHED	0x11
+#define R12A_C2H_DEBUG		0x00
+#define R12A_C2H_TX_REPORT	0x03
+#define R12A_C2H_BT_INFO	0x09
+#define R12A_C2H_RA_REPORT	0x0c
+#define R12A_C2H_IQK_FINISHED	0x11
 
-/* Structure for R88A_C2H_TX_REPORT event. */
-struct r88a_c2h_tx_rpt {
+/* Structure for R12A_C2H_TX_REPORT event. */
+struct r12a_c2h_tx_rpt {
 	uint8_t		txrptb0;
-#define R88A_TXRPTB0_QSEL_M		0x1f
-#define R88A_TXRPTB0_QSEL_S		0
-#define R88A_TXRPTB0_BC			0x20
-#define R88A_TXRPTB0_LIFE_EXPIRE	0x40
-#define R88A_TXRPTB0_RETRY_OVER		0x80
+#define R12A_TXRPTB0_QSEL_M		0x1f
+#define R12A_TXRPTB0_QSEL_S		0
+#define R12A_TXRPTB0_BC			0x20
+#define R12A_TXRPTB0_LIFE_EXPIRE	0x40
+#define R12A_TXRPTB0_RETRY_OVER		0x80
 
 	uint8_t		macid;
 	uint8_t		txrptb2;
-#define R88A_TXRPTB2_RETRY_CNT_M	0x3f
-#define R88A_TXRPTB2_RETRY_CNT_S	0
+#define R12A_TXRPTB2_RETRY_CNT_M	0x3f
+#define R12A_TXRPTB2_RETRY_CNT_S	0
 
 	uint16_t	queue_time;	/* 256 msec unit */
 	uint8_t		final_rate;
 	uint16_t	reserved;
 } __packed;
 
-/* Structure for R88A_C2H_RA_REPORT event. */
-struct r88a_c2h_ra_report {
+/* Structure for R12A_C2H_RA_REPORT event. */
+struct r12a_c2h_ra_report {
 	uint8_t		rarptb0;
-#define R88A_RARPTB0_RATE_M	0x3f
-#define R88A_RARPTB0_RATE_S	0
+#define R12A_RARPTB0_RATE_M	0x3f
+#define R12A_RARPTB0_RATE_S	0
 
 	uint8_t		macid;
 	uint8_t		rarptb2;
-#define R88A_RARPTB0_LDPC	0x01
-#define R88A_RARPTB0_TXBF	0x02
-#define R88A_RARPTB0_NOISE	0x04
+#define R12A_RARPTB0_LDPC	0x01
+#define R12A_RARPTB0_TXBF	0x02
+#define R12A_RARPTB0_NOISE	0x04
 } __packed;
 
 /* Tx MAC descriptor. */
-struct r88a_tx_desc {
+struct r12a_tx_desc {
 	uint16_t	pktlen;
 	uint8_t		offset;
 	uint8_t		flags0;
-#define R88A_FLAGS0_BMCAST	0x01
-#define R88A_FLAGS0_LSG		0x04
-#define R88A_FLAGS0_FSG		0x08
-#define R88A_FLAGS0_OWN		0x80
+#define R12A_FLAGS0_BMCAST	0x01
+#define R12A_FLAGS0_LSG		0x04
+#define R12A_FLAGS0_FSG		0x08
+#define R12A_FLAGS0_OWN		0x80
 
 	uint32_t	txdw1;
-#define R88A_TXDW1_MACID_M	0x0000003f
-#define R88A_TXDW1_MACID_S	0
-#define R88A_TXDW1_QSEL_M	0x00001f00
-#define R88A_TXDW1_QSEL_S	8
+#define R12A_TXDW1_MACID_M	0x0000003f
+#define R12A_TXDW1_MACID_S	0
+#define R12A_TXDW1_QSEL_M	0x00001f00
+#define R12A_TXDW1_QSEL_S	8
 
-#define R88A_TXDW1_QSEL_BE	0x00	/* or 0x03 */
-#define R88A_TXDW1_QSEL_BK	0x01	/* or 0x02 */
-#define R88A_TXDW1_QSEL_VI	0x04	/* or 0x05 */
-#define R88A_TXDW1_QSEL_VO	0x06	/* or 0x07 */
+#define R12A_TXDW1_QSEL_BE	0x00	/* or 0x03 */
+#define R12A_TXDW1_QSEL_BK	0x01	/* or 0x02 */
+#define R12A_TXDW1_QSEL_VI	0x04	/* or 0x05 */
+#define R12A_TXDW1_QSEL_VO	0x06	/* or 0x07 */
 #define URTWM_MAX_TID		8
 
-#define R88A_TXDW1_QSEL_BEACON	0x10
-#define R88A_TXDW1_QSEL_MGNT	0x12
+#define R12A_TXDW1_QSEL_BEACON	0x10
+#define R12A_TXDW1_QSEL_MGNT	0x12
 
-#define R88A_TXDW1_RAID_M	0x001f0000
-#define R88A_TXDW1_RAID_S	16
-#define R88A_TXDW1_CIPHER_M	0x00c00000
-#define R88A_TXDW1_CIPHER_S	22
-#define R88A_TXDW1_CIPHER_NONE	0
-#define R88A_TXDW1_CIPHER_RC4	1
-#define R88A_TXDW1_CIPHER_SM4	2
-#define R88A_TXDW1_CIPHER_AES	3
-#define R88A_TXDW1_PKTOFF_M	0x1f000000
-#define R88A_TXDW1_PKTOFF_S	24
+#define R12A_TXDW1_RAID_M	0x001f0000
+#define R12A_TXDW1_RAID_S	16
+#define R12A_TXDW1_CIPHER_M	0x00c00000
+#define R12A_TXDW1_CIPHER_S	22
+#define R12A_TXDW1_CIPHER_NONE	0
+#define R12A_TXDW1_CIPHER_RC4	1
+#define R12A_TXDW1_CIPHER_SM4	2
+#define R12A_TXDW1_CIPHER_AES	3
+#define R12A_TXDW1_PKTOFF_M	0x1f000000
+#define R12A_TXDW1_PKTOFF_S	24
 
 	uint32_t	txdw2;
-#define R88A_TXDW2_AGGEN	0x00001000
-#define R88A_TXDW2_AGGBK	0x00010000
-#define R88A_TXDW2_MOREFRAG	0x00020000
-#define R88A_TXDW2_SPE_RPT	0x00080000
+#define R12A_TXDW2_AGGEN	0x00001000
+#define R12A_TXDW2_AGGBK	0x00010000
+#define R12A_TXDW2_MOREFRAG	0x00020000
+#define R12A_TXDW2_SPE_RPT	0x00080000
 
 	uint32_t	txdw3;
-#define R88A_TXDW3_DRVRATE	0x00000100
-#define R88A_TXDW3_DISRTSFB	0x00000200
-#define R88A_TXDW3_DISDATAFB	0x00000400
-#define R88A_TXDW3_CTS2SELF	0x00000800
-#define R88A_TXDW3_RTSEN	0x00001000
-#define R88A_TXDW3_HWRTSEN	0x00002000
+#define R12A_TXDW3_DRVRATE	0x00000100
+#define R12A_TXDW3_DISRTSFB	0x00000200
+#define R12A_TXDW3_DISDATAFB	0x00000400
+#define R12A_TXDW3_CTS2SELF	0x00000800
+#define R12A_TXDW3_RTSEN	0x00001000
+#define R12A_TXDW3_HWRTSEN	0x00002000
 
 	uint32_t	txdw4;
-#define R88A_TXDW4_DATARATE_M		0x0000007f
-#define R88A_TXDW4_DATARATE_S		0
-#define R88A_TXDW4_DATARATE_FB_LMT_M	0x00001f00
-#define R88A_TXDW4_DATARATE_FB_LMT_S	8
-#define R88A_TXDW4_RTSRATE_FB_LMT_M	0x0001e000
-#define R88A_TXDW4_RTSRATE_FB_LMT_S	13
-#define R88A_TXDW4_RETRY_LMT_ENA	0x00020000
-#define R88A_TXDW4_RETRY_LMT_M		0x00fc0000
-#define R88A_TXDW4_RETRY_LMT_S		18
-#define R88A_TXDW4_RTSRATE_M		0x1f000000
-#define R88A_TXDW4_RTSRATE_S		24
+#define R12A_TXDW4_DATARATE_M		0x0000007f
+#define R12A_TXDW4_DATARATE_S		0
+#define R12A_TXDW4_DATARATE_FB_LMT_M	0x00001f00
+#define R12A_TXDW4_DATARATE_FB_LMT_S	8
+#define R12A_TXDW4_RTSRATE_FB_LMT_M	0x0001e000
+#define R12A_TXDW4_RTSRATE_FB_LMT_S	13
+#define R12A_TXDW4_RETRY_LMT_ENA	0x00020000
+#define R12A_TXDW4_RETRY_LMT_M		0x00fc0000
+#define R12A_TXDW4_RETRY_LMT_S		18
+#define R12A_TXDW4_RTSRATE_M		0x1f000000
+#define R12A_TXDW4_RTSRATE_S		24
 
 	uint32_t	txdw5;
-#define R88A_TXDW5_SHPRE	0x00000010
-#define R88A_TXDW5_DATA_LDPC	0x00000080
+#define R12A_TXDW5_SHPRE	0x00000010
+#define R12A_TXDW5_DATA_LDPC	0x00000080
 
 	uint32_t	txdw6;
 
 	uint16_t	txdsum;
 	uint16_t	flags7;
-#define R88A_FLAGS7_AGGNUM_M	0xff00
-#define R88A_FLAGS7_AGGNUM_S	8
+#define R12A_FLAGS7_AGGNUM_M	0xff00
+#define R12A_FLAGS7_AGGNUM_S	8
 
 	uint32_t	txdw8;
-#define R88A_TXDW8_HWSEQ_EN	0x00008000
+#define R12A_TXDW8_HWSEQ_EN	0x00008000
 
 	uint32_t	txdw9;
-#define R88A_TXDW9_SEQ_M	0x00fff000
-#define R88A_TXDW9_SEQ_S	12
+#define R12A_TXDW9_SEQ_M	0x00fff000
+#define R12A_TXDW9_SEQ_S	12
 } __packed __attribute__((aligned(4)));
 
-#define	R88A_INTR_MSG_LEN	60
-#define R88A_MRR_SIZE		8
+#define	R12A_INTR_MSG_LEN	60
+#define R12A_MRR_SIZE		8
 
 
 static const uint8_t ridx2rate[] =
@@ -1482,16 +1483,16 @@ struct urtwm_bb_prog {
 	const uint16_t	*reg;
 	const uint32_t	*val;
 	const uint8_t	cond[URTWM_MAX_CONDITIONS];
-#define R8812A_COND_GPA		0x01
-#define R8812A_COND_APA		0x02
-#define R8812A_COND_GLNA	0x04
-#define R8812A_COND_ALNA	0x08
-#define R8812A_COND_TYPE(t)	((t) << 4)
+#define R12A_COND_GPA		0x01
+#define R12A_COND_APA		0x02
+#define R12A_COND_GLNA	0x04
+#define R12A_COND_ALNA	0x08
+#define R12A_COND_TYPE(t)	((t) << 4)
 
-#define R8821A_COND_EXT_PA_5G	0x01
-#define R8821A_COND_EXT_LNA_5G	0x02
-#define R8821A_COND_BOARD_DEF	0x04
-#define R8821A_COND_BT		0x08	/* XXX never set by driver */
+#define R21A_COND_EXT_PA_5G	0x01
+#define R21A_COND_EXT_LNA_5G	0x02
+#define R21A_COND_BOARD_DEF	0x04
+#define R21A_COND_BT		0x08	/* XXX never set by driver */
 
 	const struct urtwm_bb_prog *next;
 };
@@ -1610,11 +1611,11 @@ static const struct urtwm_bb_prog rtl8812au_bb[] = {
 		rtl8812au_bb_regs1,
 		rtl8812au_bb_vals1_ext_pa_lna,
 		{
-			R8812A_COND_GPA | R8812A_COND_GLNA |
-			R8812A_COND_APA | R8812A_COND_ALNA |
-			R8812A_COND_TYPE(0x0),
-			R8812A_COND_APA | R8812A_COND_GLNA |
-			R8812A_COND_TYPE(0x5), 0
+			R12A_COND_GPA | R12A_COND_GLNA |
+			R12A_COND_APA | R12A_COND_ALNA |
+			R12A_COND_TYPE(0x0),
+			R12A_COND_APA | R12A_COND_GLNA |
+			R12A_COND_TYPE(0x5), 0
 		},
 		/*
 		 * Others.
@@ -1716,14 +1717,14 @@ static const struct urtwm_agc_prog rtl8812au_agc[] = {
 	{
 		nitems(rtl8812au_agc_vals0_lna_g0),
 		rtl8812au_agc_vals0_lna_g0,
-		{ R8812A_COND_GLNA | R8812A_COND_TYPE(0x0), 0 },
+		{ R12A_COND_GLNA | R12A_COND_TYPE(0x0), 0 },
 		/*
 		 * External 2GHz LNA (type 5).
 		 */
 		&(const struct urtwm_agc_prog){
 			nitems(rtl8812au_agc_vals0_lna_g5),
 			rtl8812au_agc_vals0_lna_g5,
-			{ R8812A_COND_GLNA | R8812A_COND_TYPE(0x5), 0 },
+			{ R12A_COND_GLNA | R12A_COND_TYPE(0x5), 0 },
 			/*
 			 * Others.
 			 */
@@ -1741,7 +1742,7 @@ static const struct urtwm_agc_prog rtl8812au_agc[] = {
 	{
 		nitems(rtl8812au_agc_vals1_lna_a0),
 		rtl8812au_agc_vals1_lna_a0,
-		{ R8812A_COND_ALNA | R8812A_COND_TYPE(0x0), 0 },
+		{ R12A_COND_ALNA | R12A_COND_TYPE(0x0), 0 },
 		/*
 		 * Others.
 		 */
@@ -1887,7 +1888,7 @@ static const struct urtwm_agc_prog rtl8821au_agc[] = {
 	{
 		nitems(rtl8821au_agc_vals1_pa_lna_5g),
 		rtl8821au_agc_vals1_pa_lna_5g,
-		{ R8821A_COND_EXT_PA_5G | R8821A_COND_EXT_LNA_5G, 0 },
+		{ R21A_COND_EXT_PA_5G | R21A_COND_EXT_LNA_5G, 0 },
 		/*
 		 * Others.
 		 */
@@ -2094,8 +2095,8 @@ static const struct urtwm_rf_prog rtl8812au_rf[] = {
 		rtl8812au_rf0_regs1,
 		rtl8812au_rf0_vals1_lna_g0_g5,
 		{
-			R8812A_COND_GLNA | R8812A_COND_TYPE(0x0),
-			R8812A_COND_GLNA | R8812A_COND_TYPE(0x5), 0
+			R12A_COND_GLNA | R12A_COND_TYPE(0x0),
+			R12A_COND_GLNA | R12A_COND_TYPE(0x5), 0
 		},
 		/* Others. */
 		&(const struct urtwm_rf_prog){
@@ -2111,7 +2112,7 @@ static const struct urtwm_rf_prog rtl8812au_rf[] = {
 		nitems(rtl8812au_rf0_regs2),
 		rtl8812au_rf0_regs2,
 		rtl8812au_rf0_vals2_lna_a0,
-		{ R8812A_COND_ALNA | R8812A_COND_TYPE(0x0), 0 },
+		{ R12A_COND_ALNA | R12A_COND_TYPE(0x0), 0 },
 		/* Others. */
 		&(const struct urtwm_rf_prog){
 			nitems(rtl8812au_rf0_regs2),
@@ -2134,8 +2135,8 @@ static const struct urtwm_rf_prog rtl8812au_rf[] = {
 		rtl8812au_rf0_regs4,
 		rtl8812au_rf0_vals4_lna_g0_g5,
 		{
-			R8812A_COND_GLNA | R8812A_COND_TYPE(0x0),
-			R8812A_COND_GLNA | R8812A_COND_TYPE(0x5), 0
+			R12A_COND_GLNA | R12A_COND_TYPE(0x0),
+			R12A_COND_GLNA | R12A_COND_TYPE(0x5), 0
 		},
 		/* Others */
 		&(const struct urtwm_rf_prog){
@@ -2151,7 +2152,7 @@ static const struct urtwm_rf_prog rtl8812au_rf[] = {
 		nitems(rtl8812au_rf0_regs5),
 		rtl8812au_rf0_regs5,
 		rtl8812au_rf0_vals5_pa_g0,
-		{ R8812A_COND_GPA | R8812A_COND_TYPE(0x0), 0 },
+		{ R12A_COND_GPA | R12A_COND_TYPE(0x0), 0 },
 		/* Others. */
 		&(const struct urtwm_rf_prog){
 			nitems(rtl8812au_rf0_regs5),
@@ -2173,13 +2174,13 @@ static const struct urtwm_rf_prog rtl8812au_rf[] = {
 		nitems(rtl8812au_rf0_regs7),
 		rtl8812au_rf0_regs7,
 		rtl8812au_rf0_vals7_pa_a0,
-		{ R8812A_COND_APA | R8812A_COND_TYPE(0x0), 0 },
+		{ R12A_COND_APA | R12A_COND_TYPE(0x0), 0 },
 		/* External 5GHz PA, type 5. */
 		&(const struct urtwm_rf_prog){
 			nitems(rtl8812au_rf0_regs7),
 			rtl8812au_rf0_regs7,
 			rtl8812au_rf0_vals7_pa_a5,
-			{ R8812A_COND_APA | R8812A_COND_TYPE(0x5), 0 },
+			{ R12A_COND_APA | R12A_COND_TYPE(0x5), 0 },
 			/* Others. */
 			&(const struct urtwm_rf_prog){
 				nitems(rtl8812au_rf0_regs7),
@@ -2196,8 +2197,8 @@ static const struct urtwm_rf_prog rtl8812au_rf[] = {
 		rtl8812au_rf0_regs8,
 		rtl8812au_rf0_vals8_pa_a0_a5,
 		{
-			R8812A_COND_APA | R8812A_COND_TYPE(0x0),
-			R8812A_COND_APA | R8812A_COND_TYPE(0x5), 0
+			R12A_COND_APA | R12A_COND_TYPE(0x0),
+			R12A_COND_APA | R12A_COND_TYPE(0x5), 0
 		},
 		/* Others. */
 		&(const struct urtwm_rf_prog){
@@ -2220,13 +2221,13 @@ static const struct urtwm_rf_prog rtl8812au_rf[] = {
 		nitems(rtl8812au_rf0_regs10),
 		rtl8812au_rf0_regs10,
 		rtl8812au_rf0_vals10_pa_a0,
-		{ R8812A_COND_APA | R8812A_COND_TYPE(0x0), 0 },
+		{ R12A_COND_APA | R12A_COND_TYPE(0x0), 0 },
 		/* External 5GHz PA, type 5. */
 		&(const struct urtwm_rf_prog){
 			nitems(rtl8812au_rf0_regs10),
 			rtl8812au_rf0_regs10,
 			rtl8812au_rf0_vals10_pa_a5,
-			{ R8812A_COND_APA | R8812A_COND_TYPE(0x5), 0 },
+			{ R12A_COND_APA | R12A_COND_TYPE(0x5), 0 },
 			/* Others. */
 			&(const struct urtwm_rf_prog){
 				nitems(rtl8812au_rf0_regs10),
@@ -2260,8 +2261,8 @@ static const struct urtwm_rf_prog rtl8812au_rf[] = {
 		rtl8812au_rf0_regs1,
 		rtl8812au_rf0_vals1_lna_g0_g5,
 		{
-			R8812A_COND_GLNA | R8812A_COND_TYPE(0x0),
-			R8812A_COND_GLNA | R8812A_COND_TYPE(0x5), 0
+			R12A_COND_GLNA | R12A_COND_TYPE(0x0),
+			R12A_COND_GLNA | R12A_COND_TYPE(0x5), 0
 		},
 		/* Others. */
 		&(const struct urtwm_rf_prog){
@@ -2278,7 +2279,7 @@ static const struct urtwm_rf_prog rtl8812au_rf[] = {
 		nitems(rtl8812au_rf0_regs2),
 		rtl8812au_rf0_regs2,
 		rtl8812au_rf0_vals2_lna_a0,
-		{ R8812A_COND_ALNA | R8812A_COND_TYPE(0x0), 0 },
+		{ R12A_COND_ALNA | R12A_COND_TYPE(0x0), 0 },
 		/* Others. */
 		&(const struct urtwm_rf_prog){
 			nitems(rtl8812au_rf0_regs2),
@@ -2302,8 +2303,8 @@ static const struct urtwm_rf_prog rtl8812au_rf[] = {
 		rtl8812au_rf0_regs4,
 		rtl8812au_rf0_vals4_lna_g0_g5,
 		{
-			R8812A_COND_GLNA | R8812A_COND_TYPE(0x0),
-			R8812A_COND_GLNA | R8812A_COND_TYPE(0x5), 0
+			R12A_COND_GLNA | R12A_COND_TYPE(0x0),
+			R12A_COND_GLNA | R12A_COND_TYPE(0x5), 0
 		},
 		/* Others */
 		&(const struct urtwm_rf_prog){
@@ -2320,7 +2321,7 @@ static const struct urtwm_rf_prog rtl8812au_rf[] = {
 		nitems(rtl8812au_rf0_regs5),
 		rtl8812au_rf0_regs5,
 		rtl8812au_rf0_vals5_pa_g0,
-		{ R8812A_COND_GPA | R8812A_COND_TYPE(0x0), 0 },
+		{ R12A_COND_GPA | R12A_COND_TYPE(0x0), 0 },
 		/* Others. */
 		&(const struct urtwm_rf_prog){
 			nitems(rtl8812au_rf0_regs5),
@@ -2342,13 +2343,13 @@ static const struct urtwm_rf_prog rtl8812au_rf[] = {
 		nitems(rtl8812au_rf0_regs7),
 		rtl8812au_rf0_regs7,
 		rtl8812au_rf0_vals7_pa_a0,
-		{ R8812A_COND_APA | R8812A_COND_TYPE(0x0), 0 },
+		{ R12A_COND_APA | R12A_COND_TYPE(0x0), 0 },
 		/* External 5GHz PA, type 5. */
 		&(const struct urtwm_rf_prog){
 			nitems(rtl8812au_rf0_regs7),
 			rtl8812au_rf0_regs7,
 			rtl8812au_rf1_vals7_pa_a5,
-			{ R8812A_COND_APA | R8812A_COND_TYPE(0x5), 0 },
+			{ R12A_COND_APA | R12A_COND_TYPE(0x5), 0 },
 			/* Others. */
 			&(const struct urtwm_rf_prog){
 				nitems(rtl8812au_rf0_regs7),
@@ -2365,8 +2366,8 @@ static const struct urtwm_rf_prog rtl8812au_rf[] = {
 		rtl8812au_rf0_regs8,
 		rtl8812au_rf1_vals8_pa_a0_a5,
 		{
-			R8812A_COND_APA | R8812A_COND_TYPE(0x0),
-			R8812A_COND_APA | R8812A_COND_TYPE(0x5), 0
+			R12A_COND_APA | R12A_COND_TYPE(0x0),
+			R12A_COND_APA | R12A_COND_TYPE(0x5), 0
 		},
 		/* Others. */
 		&(const struct urtwm_rf_prog){
@@ -2391,15 +2392,15 @@ static const struct urtwm_rf_prog rtl8812au_rf[] = {
 		rtl8812au_rf0_regs10,
 		rtl8812au_rf1_vals10_pa_g0_a0,
 		{
-			R8812A_COND_GPA | R8812A_COND_TYPE(0x0),
-			R8812A_COND_APA | R8812A_COND_TYPE(0x0), 0
+			R12A_COND_GPA | R12A_COND_TYPE(0x0),
+			R12A_COND_APA | R12A_COND_TYPE(0x0), 0
 		},
 		/* External 5GHz PA, type 5. */
 		&(const struct urtwm_rf_prog){
 			nitems(rtl8812au_rf0_regs10),
 			rtl8812au_rf0_regs10,
 			rtl8812au_rf1_vals10_pa_a5,
-			{ R8812A_COND_APA | R8812A_COND_TYPE(0x5), 0 },
+			{ R12A_COND_APA | R12A_COND_TYPE(0x5), 0 },
 			/* Others. */
 			&(const struct urtwm_rf_prog){
 				nitems(rtl8812au_rf0_regs10),
@@ -2555,7 +2556,7 @@ static const struct urtwm_rf_prog rtl8821au_rf[] = {
 		nitems(rtl8821au_rf_regs1),
 		rtl8821au_rf_regs1,
 		rtl8821au_rf_vals1_no_ext_5g,
-		{ R8821A_COND_BOARD_DEF, 0 },
+		{ R21A_COND_BOARD_DEF, 0 },
 		/*
 		 * With external 5GHz PA and LNA.
 		 */
@@ -2563,7 +2564,7 @@ static const struct urtwm_rf_prog rtl8821au_rf[] = {
 			nitems(rtl8821au_rf_regs1),
 			rtl8821au_rf_regs1,
 			rtl8821au_rf_vals1_ext_5g,
-			{ R8821A_COND_EXT_PA_5G | R8821A_COND_EXT_LNA_5G, 0 },
+			{ R21A_COND_EXT_PA_5G | R21A_COND_EXT_LNA_5G, 0 },
 			/*
 			 * Others.
 			 */
