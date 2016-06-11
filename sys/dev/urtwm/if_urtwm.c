@@ -819,6 +819,7 @@ urtwm_vap_create(struct ieee80211com *ic, const char name[IFNAMSIZ], int unit,
 	vap->iv_key_alloc = urtwm_key_alloc;
 	vap->iv_key_set = urtwm_key_set;
 	vap->iv_key_delete = urtwm_key_delete;
+	vap->iv_max_aid = URTWM_MACID_MAX(sc) + 1;
 
 	if (opmode == IEEE80211_M_IBSS) {
 		uvp->recv_mgmt = vap->iv_recv_mgmt;
@@ -976,7 +977,7 @@ urtwm_ratectl_tx_complete(struct urtwm_softc *sc, void *buf, int len)
 		return;
 	}
 
-	if (rpt->macid > R21A_MACID_MAX) {
+	if (rpt->macid > URTWM_MACID_MAX(sc)) {
 		device_printf(sc->sc_dev,
 		    "macid %u is too big; increase MACID_MAX limit\n",
 		    rpt->macid);

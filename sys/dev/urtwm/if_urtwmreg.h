@@ -1037,9 +1037,8 @@ struct r92c_fw_cmd_macid_cfg {
 #endif
 #define URTWM_MACID_BC		1	/* Broadcast. */
 #define URTWM_MACID_BSS		0
-#define R12A_MACID_MAX	31
-#define R21A_MACID_MAX	63
-#define URTWM_MACID_MAX(sc)	R21A_MACID_MAX	/* XXX */
+#define R12A_MACID_MAX		63
+#define URTWM_MACID_MAX(sc)	R12A_MACID_MAX
 #define URTWM_MACID_UNDEFINED	(uint8_t)-1
 #define URTWM_MACID_VALID	0x80
 #ifdef URTWM_TODO

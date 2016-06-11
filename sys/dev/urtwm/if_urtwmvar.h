@@ -197,7 +197,7 @@ struct urtwm_softc {
 	uint16_t		next_rom_addr;
 	uint32_t		keys_bmap;
 
-	struct ieee80211_node	*node_list[R21A_MACID_MAX + 1];
+	struct ieee80211_node	*node_list[R12A_MACID_MAX + 1];
 	struct mtx		nt_mtx;
 
 	struct mtx		sc_mtx;
