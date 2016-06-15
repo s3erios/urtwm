@@ -161,8 +161,10 @@ static struct ieee80211vap *urtwm_vap_create(struct ieee80211com *,
                     const uint8_t [IEEE80211_ADDR_LEN],
                     const uint8_t [IEEE80211_ADDR_LEN]);
 static void		urtwm_vap_delete(struct ieee80211vap *);
-static void		urtwm_vap_delete_tx(struct urtwm_softc *,
+static void		urtwm_vap_clear_tx(struct urtwm_softc *,
 			    struct ieee80211vap *);
+static void		urtwm_vap_clear_tx_queue(struct urtwm_softc *,
+			    urtwm_datahead *, struct ieee80211vap *);
 static struct mbuf *	urtwm_rx_copy_to_mbuf(struct urtwm_softc *,
 			    struct r92c_rx_stat *, int);
 static struct mbuf *	urtwm_report_intr(struct urtwm_softc *,
@@ -847,7 +849,7 @@ urtwm_vap_delete(struct ieee80211vap *vap)
 	if (uvp->bcn_mbuf != NULL)
 		m_freem(uvp->bcn_mbuf);
 	/* Cancel any unfinished Tx. */
-	urtwm_vap_delete_tx(sc, vap);
+	urtwm_vap_clear_tx(sc, vap);
 	URTWM_UNLOCK(sc);
 	if (vap->iv_opmode == IEEE80211_M_IBSS) {
 		ieee80211_draintask(ic, &uvp->tsf_sync_adhoc_task);
@@ -859,15 +861,22 @@ urtwm_vap_delete(struct ieee80211vap *vap)
 }
 
 static void
-urtwm_vap_delete_tx(struct urtwm_softc *sc, struct ieee80211vap *vap)
+urtwm_vap_clear_tx(struct urtwm_softc *sc, struct ieee80211vap *vap)
 {
-	int i;
 
 	URTWM_ASSERT_LOCKED(sc);
 
-	for (i = 0; i < nitems(sc->sc_tx); i++) {
-		struct urtwm_data *dp = &sc->sc_tx[i];
+	urtwm_vap_clear_tx_queue(sc, &sc->sc_tx_active, vap);
+	urtwm_vap_clear_tx_queue(sc, &sc->sc_tx_pending, vap);
+}
 
+static void
+urtwm_vap_clear_tx_queue(struct urtwm_softc *sc, urtwm_datahead *head,
+    struct ieee80211vap *vap)
+{
+	struct urtwm_data *dp, *tmp;
+
+	STAILQ_FOREACH_SAFE(dp, head, next, tmp) {
 		if (dp->ni != NULL) {
 			if (dp->ni->ni_vap == vap) {
 				ieee80211_free_node(dp->ni);
@@ -877,6 +886,10 @@ urtwm_vap_delete_tx(struct urtwm_softc *sc, struct ieee80211vap *vap)
 					m_freem(dp->m);
 					dp->m = NULL;
 				}
+
+				STAILQ_REMOVE(head, dp, urtwm_data, next);
+				STAILQ_INSERT_TAIL(&sc->sc_tx_inactive, dp,
+				    next);
 			}
 		}
 	}
