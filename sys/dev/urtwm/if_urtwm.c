@@ -2588,7 +2588,6 @@ urtwm_init_beacon(struct urtwm_softc *sc, struct urtwm_vap *uvp)
 	txd->txdw1 |= htole32(SM(R12A_TXDW1_MACID, URTWM_MACID_BC));
 
 	txd->txdw3 = htole32(R12A_TXDW3_DRVRATE);
-	txd->txdw4 = htole32(SM(R12A_TXDW4_DATARATE, URTWM_RIDX_CCK1));
 }
 
 static int
@@ -2596,6 +2595,7 @@ urtwm_setup_beacon(struct urtwm_softc *sc, struct ieee80211_node *ni)
 {
  	struct ieee80211vap *vap = ni->ni_vap;
 	struct urtwm_vap *uvp = URTWM_VAP(vap);
+	struct r12a_tx_desc *txd = &uvp->bcn_desc;
 	struct mbuf *m;
 	int error;
 
@@ -2615,6 +2615,13 @@ urtwm_setup_beacon(struct urtwm_softc *sc, struct ieee80211_node *ni)
 		m_freem(uvp->bcn_mbuf);
 
 	uvp->bcn_mbuf = m;
+
+	txd->txdw4 &= ~htole32(R12A_TXDW4_DATARATE_M);
+	if (IEEE80211_IS_CHAN_5GHZ(ni->ni_chan)) {
+		txd->txdw4 = htole32(SM(R12A_TXDW4_DATARATE,
+		    URTWM_RIDX_OFDM6));
+	} else
+		txd->txdw4 = htole32(SM(R12A_TXDW4_DATARATE, URTWM_RIDX_CCK1));
 
 	if ((error = urtwm_tx_beacon(sc, uvp)) != 0)
 		return (error);
