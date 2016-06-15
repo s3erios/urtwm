@@ -161,6 +161,8 @@ static struct ieee80211vap *urtwm_vap_create(struct ieee80211com *,
                     const uint8_t [IEEE80211_ADDR_LEN],
                     const uint8_t [IEEE80211_ADDR_LEN]);
 static void		urtwm_vap_delete(struct ieee80211vap *);
+static void		urtwm_vap_delete_tx(struct urtwm_softc *,
+			    struct ieee80211vap *);
 static struct mbuf *	urtwm_rx_copy_to_mbuf(struct urtwm_softc *,
 			    struct r92c_rx_stat *, int);
 static struct mbuf *	urtwm_report_intr(struct urtwm_softc *,
@@ -704,7 +706,6 @@ urtwm_detach(device_t self)
 {
 	struct urtwm_softc *sc = device_get_softc(self);
 	struct ieee80211com *ic = &sc->sc_ic;
-	unsigned int x;
 
 	/* Prevent further ioctls. */
 	URTWM_LOCK(sc);
@@ -724,14 +725,8 @@ urtwm_detach(device_t self)
 
 	STAILQ_INIT(&sc->sc_rx_active);
 	STAILQ_INIT(&sc->sc_rx_inactive);
-	URTWM_UNLOCK(sc);
-
-	/* drain USB transfers */
-	for (x = 0; x != URTWM_N_TRANSFER; x++)
-		usbd_transfer_drain(sc->sc_xfer[x]);
 
 	/* Free data buffers. */
-	URTWM_LOCK(sc);
 	urtwm_free_tx_list(sc);
 	urtwm_free_rx_list(sc);
 	URTWM_UNLOCK(sc);
@@ -841,10 +836,19 @@ static void
 urtwm_vap_delete(struct ieee80211vap *vap)
 {
 	struct ieee80211com *ic = vap->iv_ic;
+	struct urtwm_softc *sc = ic->ic_softc;
 	struct urtwm_vap *uvp = URTWM_VAP(vap);
 
+	/* Guarantee that nothing will go through this vap. */
+	ieee80211_new_state(vap, IEEE80211_S_INIT, -1);
+	ieee80211_draintask(ic, &vap->iv_nstate_task);
+
+	URTWM_LOCK(sc);
 	if (uvp->bcn_mbuf != NULL)
 		m_freem(uvp->bcn_mbuf);
+	/* Cancel any unfinished Tx. */
+	urtwm_vap_delete_tx(sc, vap);
+	URTWM_UNLOCK(sc);
 	if (vap->iv_opmode == IEEE80211_M_IBSS) {
 		ieee80211_draintask(ic, &uvp->tsf_sync_adhoc_task);
 		callout_drain(&uvp->tsf_sync_adhoc);
@@ -852,6 +856,30 @@ urtwm_vap_delete(struct ieee80211vap *vap)
 	ieee80211_ratectl_deinit(vap);
 	ieee80211_vap_detach(vap);
 	free(uvp, M_80211_VAP);
+}
+
+static void
+urtwm_vap_delete_tx(struct urtwm_softc *sc, struct ieee80211vap *vap)
+{
+	int i;
+
+	URTWM_ASSERT_LOCKED(sc);
+
+	for (i = 0; i < nitems(sc->sc_tx); i++) {
+		struct urtwm_data *dp = &sc->sc_tx[i];
+
+		if (dp->ni != NULL) {
+			if (dp->ni->ni_vap == vap) {
+				ieee80211_free_node(dp->ni);
+				dp->ni = NULL;
+
+				if (dp->m != NULL) {
+					m_freem(dp->m);
+					dp->m = NULL;
+				}
+			}
+		}
+	}
 }
 
 static struct mbuf *
@@ -5309,7 +5337,6 @@ urtwm_get_txpower(struct urtwm_softc *sc, int chain,
 	for (ridx = URTWM_RIDX_CCK1; ridx <= max_mcs; ridx++) {
 		if (power[ridx] > R92C_MAX_TX_PWR)
 			power[ridx] = R92C_MAX_TX_PWR;
-
 	}
 
 #ifdef USB_DEBUG

@@ -28,7 +28,7 @@
 /* Maximum number of output pipes is 4. */
 #define R12A_MAX_EPOUT	4
 
-#define R92C_MAX_TX_PWR	0x3f
+#define R92C_MAX_TX_PWR		0x3f
 
 #define R12A_PUBQ_NPAGES	219
 #define R12A_TXPKTBUF_COUNT	255
