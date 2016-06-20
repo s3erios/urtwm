@@ -205,8 +205,10 @@ static usb_error_t	urtwm_setbits_2(struct urtwm_softc *, uint16_t,
 			    uint16_t, uint16_t);
 static usb_error_t	urtwm_setbits_4(struct urtwm_softc *, uint16_t,
 			    uint32_t, uint32_t);
+#ifndef URTWM_WITHOUT_UCODE
 static int		urtwm_fw_cmd(struct urtwm_softc *, uint8_t,
 			    const void *, int);
+#endif
 static void		urtwm_cmdq_cb(void *, int);
 static int		urtwm_cmd_sleepable(struct urtwm_softc *, const void *,
 			    size_t, CMD_FUNC_PROTO);
@@ -1675,6 +1677,7 @@ urtwm_setbits_4(struct urtwm_softc *sc, uint16_t addr, uint32_t clr,
 	    (urtwm_read_4(sc, addr) & ~clr) | set));
 }
 
+#ifndef URTWM_WITHOUT_UCODE
 static int
 urtwm_fw_cmd(struct urtwm_softc *sc, uint8_t id, const void *buf, int len)
 {
@@ -1720,6 +1723,7 @@ urtwm_fw_cmd(struct urtwm_softc *sc, uint8_t id, const void *buf, int len)
 
 	return (0);
 }
+#endif	/* URTWM_WITHOUT_UCODE */
 
 static void
 urtwm_cmdq_cb(void *arg, int pending)
@@ -2213,7 +2217,9 @@ urtwm_config_specific(struct urtwm_softc *sc)
 		sc->sc_get_rssi_cck = urtwm_r12a_get_rssi_cck;
 		sc->sc_power_on = urtwm_r12a_power_on;
 		sc->sc_power_off = urtwm_r12a_power_off;
+#ifndef URTWM_WITHOUT_UCODE
 		sc->sc_fw_reset = urtwm_r12a_fw_reset;
+#endif
 		sc->sc_set_page_size = urtwm_r12a_set_page_size;
 		sc->sc_crystalcap_write = urtwm_r12a_crystalcap_write;
 		sc->sc_set_band_2ghz = urtwm_r12a_set_band_2ghz;
@@ -2246,7 +2252,9 @@ urtwm_config_specific(struct urtwm_softc *sc)
 		sc->sc_get_rssi_cck = urtwm_r21a_get_rssi_cck;
 		sc->sc_power_on = urtwm_r21a_power_on;
 		sc->sc_power_off = urtwm_r21a_power_off;
+#ifndef URTWM_WITHOUT_UCODE
 		sc->sc_fw_reset = urtwm_r21a_fw_reset;
+#endif
 		sc->sc_set_page_size = urtwm_r21a_set_page_size;
 		sc->sc_crystalcap_write = urtwm_r21a_crystalcap_write;
 		sc->sc_set_band_2ghz = urtwm_r21a_set_band_2ghz;
@@ -3400,9 +3408,11 @@ urtwm_newstate(struct ieee80211vap *vap, enum ieee80211_state nstate, int arg)
 			callout_stop(&uvp->tsf_sync_adhoc);
 		}
 
+#ifndef URTWM_WITHOUT_UCODE
 		/* Disable power management. */
 		callout_stop(&sc->sc_pwrmode_init);
 		urtwm_set_pwrmode(sc, vap, 0);
+#endif
 
 		/* Turn link LED off. */
 		urtwm_set_led(sc, URTWM_LED_LINK, 0);
