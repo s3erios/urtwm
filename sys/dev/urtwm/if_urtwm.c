@@ -205,10 +205,8 @@ static usb_error_t	urtwm_setbits_2(struct urtwm_softc *, uint16_t,
 			    uint16_t, uint16_t);
 static usb_error_t	urtwm_setbits_4(struct urtwm_softc *, uint16_t,
 			    uint32_t, uint32_t);
-#ifdef URTWM_TODO
 static int		urtwm_fw_cmd(struct urtwm_softc *, uint8_t,
 			    const void *, int);
-#endif
 static void		urtwm_cmdq_cb(void *, int);
 static int		urtwm_cmd_sleepable(struct urtwm_softc *, const void *,
 			    size_t, CMD_FUNC_PROTO);
@@ -248,6 +246,7 @@ static void		urtwm_parse_rom(struct urtwm_softc *,
 #ifdef URTWM_TODO
 static int		urtwm_ra_init(struct urtwm_softc *);
 #endif
+static int		urtwm_ioctl_reset(struct ieee80211vap *, u_long);
 static void		urtwm_init_beacon(struct urtwm_softc *,
 			    struct urtwm_vap *);
 static int		urtwm_setup_beacon(struct urtwm_softc *,
@@ -255,6 +254,19 @@ static int		urtwm_setup_beacon(struct urtwm_softc *,
 static void		urtwm_update_beacon(struct ieee80211vap *, int);
 static int		urtwm_tx_beacon(struct urtwm_softc *sc,
 			    struct urtwm_vap *);
+#ifndef URTWM_WITHOUT_UCODE
+static int		urtwm_construct_nulldata(struct urtwm_softc *,
+			    struct ieee80211vap *, uint8_t *, int);
+static int		urtwm_push_nulldata(struct urtwm_softc *,
+			    struct ieee80211vap *);
+static void		urtwm_pwrmode_init(void *);
+static void		urtwm_set_pwrmode_cb(struct urtwm_softc *,
+			    union sec_param *);
+static int		urtwm_set_pwrmode(struct urtwm_softc *,
+			    struct ieee80211vap *, int);
+static void		urtwm_set_media_status(struct urtwm_softc *,
+			    union sec_param *);
+#endif
 static int		urtwm_key_alloc(struct ieee80211vap *,
 			    struct ieee80211_key *, ieee80211_keyix *,
 			    ieee80211_keyix *);
@@ -557,6 +569,7 @@ urtwm_attach(device_t self)
 	    MTX_NETWORK_LOCK, MTX_DEF);
 	URTWM_CMDQ_LOCK_INIT(sc);
 	URTWM_NT_LOCK_INIT(sc);
+	callout_init(&sc->sc_pwrmode_init, 0);
 	mbufq_init(&sc->sc_snd, ifqmaxlen);
 
 	error = urtwm_setup_endpoints(sc);
@@ -599,6 +612,9 @@ urtwm_attach(device_t self)
 		| IEEE80211_C_MONITOR		/* monitor mode */
 		| IEEE80211_C_IBSS		/* adhoc mode */
 		| IEEE80211_C_HOSTAP		/* hostap mode */
+#ifndef URTWM_WITHOUT_UCODE
+		| IEEE80211_C_PMGT		/* Station-side power mgmt */
+#endif
 		| IEEE80211_C_SHPREAMBLE	/* short preamble supported */
 		| IEEE80211_C_SHSLOT		/* short slot time supported */
 #if 0
@@ -737,6 +753,7 @@ urtwm_detach(device_t self)
 	URTWM_UNLOCK(sc);
 
 	if (ic->ic_softc == sc) {
+		callout_drain(&sc->sc_pwrmode_init);
 		ieee80211_draintask(ic, &sc->cmdq_task);
 		ieee80211_ifdetach(ic);
 	}
@@ -819,13 +836,13 @@ urtwm_vap_create(struct ieee80211com *ic, const char name[IFNAMSIZ], int unit,
 		ifp->if_capenable |= IFCAP_RXCSUM_IPV6;
 	URTWM_UNLOCK(sc);
 
-	if (opmode == IEEE80211_M_HOSTAP || opmode == IEEE80211_M_IBSS)
-		urtwm_init_beacon(sc, uvp);
+	urtwm_init_beacon(sc, uvp);
 
 	/* override state transition machine */
 	uvp->newstate = vap->iv_newstate;
 	vap->iv_newstate = urtwm_newstate;
 	vap->iv_update_beacon = urtwm_update_beacon;
+	vap->iv_reset = urtwm_ioctl_reset;
 	vap->iv_key_alloc = urtwm_key_alloc;
 	vap->iv_key_set = urtwm_key_set;
 	vap->iv_key_delete = urtwm_key_delete;
@@ -1658,7 +1675,6 @@ urtwm_setbits_4(struct urtwm_softc *sc, uint16_t addr, uint32_t clr,
 	    (urtwm_read_4(sc, addr) & ~clr) | set));
 }
 
-#ifdef URTWM_TODO
 static int
 urtwm_fw_cmd(struct urtwm_softc *sc, uint8_t id, const void *buf, int len)
 {
@@ -1704,7 +1720,6 @@ urtwm_fw_cmd(struct urtwm_softc *sc, uint8_t id, const void *buf, int len)
 
 	return (0);
 }
-#endif	/* URTWM_TODO */
 
 static void
 urtwm_cmdq_cb(void *arg, int pending)
@@ -2219,6 +2234,7 @@ urtwm_config_specific(struct urtwm_softc *sc)
 		sc->pktbuf_count = R12A_TXPKTBUF_COUNT;
 		sc->tx_boundary = R12A_TX_PAGE_BOUNDARY;
 		sc->npubqpages = R12A_PUBQ_NPAGES;
+		sc->page_size = R12A_TX_PAGE_SIZE;
 		sc->rx_dma_size = R12A_RX_DMA_BUFFER_SIZE;
 
 		sc->ntxchains = 2;
@@ -2251,6 +2267,7 @@ urtwm_config_specific(struct urtwm_softc *sc)
 		sc->pktbuf_count = R12A_TXPKTBUF_COUNT;
 		sc->tx_boundary = R21A_TX_PAGE_BOUNDARY;
 		sc->npubqpages = R12A_PUBQ_NPAGES;
+		sc->page_size = R21A_TX_PAGE_SIZE;
 		sc->rx_dma_size = R12A_RX_DMA_BUFFER_SIZE;
 
 		sc->ntxchains = 1;
@@ -2622,6 +2639,40 @@ urtwn_ra_init(struct urtwm_softc *sc)
 }
 #endif	/* URTWM_TODO */
 
+static int
+urtwm_ioctl_reset(struct ieee80211vap *vap, u_long cmd)
+{
+	int error;
+
+	switch (cmd) {
+#ifndef URTWM_WITHOUT_UCODE
+	case IEEE80211_IOC_POWERSAVE:
+	case IEEE80211_IOC_POWERSAVESLEEP:
+	{
+		struct urtwm_softc *sc = vap->iv_ic->ic_softc;
+
+		if (vap->iv_opmode == IEEE80211_M_STA) {
+			URTWM_LOCK(sc);
+			if (sc->sc_flags & URTWM_RUNNING)
+				error = urtwm_set_pwrmode(sc, vap, 1);
+			else
+				error = 0;
+			URTWM_UNLOCK(sc);
+			if (error != 0)
+				error = ENETRESET;
+		} else
+			error = EOPNOTSUPP;
+		break;
+	}
+#endif
+	default:
+		error = ENETRESET;
+		break;
+	}
+
+	return (error);
+}
+
 static void
 urtwm_init_beacon(struct urtwm_softc *sc, struct urtwm_vap *uvp)
 {
@@ -2737,6 +2788,246 @@ urtwm_tx_beacon(struct urtwm_softc *sc, struct urtwm_vap *uvp)
 
 	return (0);
 }
+
+#ifndef URTWM_WITHOUT_UCODE
+static int
+urtwm_construct_nulldata(struct urtwm_softc *sc, struct ieee80211vap *vap,
+    uint8_t *ptr, int qos)
+{
+	struct ieee80211com *ic = &sc->sc_ic;
+	struct r12a_tx_desc *txd;
+	struct ieee80211_frame *wh;
+
+	txd = (struct r12a_tx_desc *)ptr;
+	txd->offset = sizeof(*txd);
+	txd->flags0 = R12A_FLAGS0_OWN | R12A_FLAGS0_FSG | R12A_FLAGS0_LSG;
+	txd->txdw1 = htole32(
+	    SM(R12A_TXDW1_QSEL, R12A_TXDW1_QSEL_MGNT));
+
+	txd->txdw3 = htole32(R12A_TXDW3_DRVRATE);
+	if (ic->ic_curmode == IEEE80211_MODE_11B) {
+		txd->txdw4 = htole32(SM(R12A_TXDW4_DATARATE,
+		    URTWM_RIDX_CCK1));
+	} else {
+		txd->txdw4 = htole32(SM(R12A_TXDW4_DATARATE,
+		    URTWM_RIDX_OFDM6));
+	}
+
+	/* XXX obtain from net80211 */
+	wh = (struct ieee80211_frame *)(txd + 1);
+	wh->i_fc[0] = IEEE80211_FC0_VERSION_0 | IEEE80211_FC0_TYPE_DATA;
+	wh->i_fc[1] = IEEE80211_FC1_DIR_TODS;
+	IEEE80211_ADDR_COPY(wh->i_addr1, vap->iv_bss->ni_bssid);
+	IEEE80211_ADDR_COPY(wh->i_addr2, vap->iv_myaddr);
+	IEEE80211_ADDR_COPY(wh->i_addr3, vap->iv_bss->ni_macaddr);
+
+	if (qos) {
+		struct ieee80211_qosframe *qwh;
+		const int tid = WME_AC_TO_TID(WME_AC_BE);
+
+		txd->pktlen = htole16(sizeof(*qwh));
+		qwh = (struct ieee80211_qosframe *)ptr;
+		qwh->i_fc[0] |= IEEE80211_FC0_SUBTYPE_QOS_NULL;
+		qwh->i_qos[0] = tid & IEEE80211_QOS_TID;
+	} else {
+		txd->txdw8 = htole32(R12A_TXDW8_HWSEQ_EN);
+
+		txd->pktlen = htole16(sizeof(*wh));
+		wh->i_fc[0] |= IEEE80211_FC0_SUBTYPE_NODATA;
+	}
+
+	urtwm_tx_checksum(txd);
+
+	return (sizeof(*txd) + le16toh(txd->pktlen));
+}
+
+static int
+urtwm_push_nulldata(struct urtwm_softc *sc, struct ieee80211vap *vap)
+{
+	struct urtwm_vap *uvp = URTWM_VAP(vap);
+	struct ieee80211com *ic = vap->iv_ic;
+	struct ieee80211_channel *c = ic->ic_curchan;
+	struct r12a_fw_cmd_rsvdpage rsvd;
+	struct r12a_tx_desc *txd;
+	struct urtwm_data *data;
+	uint8_t *ptr;
+	int required_size, bcn_size, null_size, error, ntries;
+
+	if (!(sc->sc_flags & URTWM_FW_LOADED))
+		return (0);	/* requires firmware */
+
+	KASSERT(sc->page_size > 0, ("page size was not set!\n"));
+
+	data = urtwm_getbuf(sc);
+	if (data == NULL)
+		return (ENOMEM);
+
+	/* Leave some space for beacon (multi-vap) */
+	bcn_size = roundup(URTWM_BCN_MAX_SIZE, sc->page_size);
+	/* 1 page for Null Data + 1 page for Qos Null Data frames. */
+	required_size = bcn_size + sc->page_size * 2;
+
+	/* Setup beacon descriptor. */
+	memcpy(data->buf, &uvp->bcn_desc, sizeof(uvp->bcn_desc));
+
+	txd = (struct r12a_tx_desc *)data->buf;
+	txd->txdw4 &= ~htole32(R12A_TXDW4_DATARATE_M);
+	if (IEEE80211_IS_CHAN_5GHZ(c)) {
+		txd->txdw4 = htole32(SM(R12A_TXDW4_DATARATE,
+		    URTWM_RIDX_OFDM6));
+	} else
+		txd->txdw4 = htole32(SM(R12A_TXDW4_DATARATE, URTWM_RIDX_CCK1));
+	txd->pktlen = htole16(required_size - sizeof(*txd));
+
+	/* Compute Tx descriptor checksum. */
+	urtwm_tx_checksum(txd);
+
+	ptr = (uint8_t *)(txd + 1);
+	memset(ptr, 0, required_size - sizeof(*txd));
+
+	/* Construct Null Data frame. */
+	ptr += bcn_size - sizeof(*txd);
+	null_size = urtwm_construct_nulldata(sc, vap, ptr, 0);
+	KASSERT(null_size < sc->page_size,
+	    ("recalculate size for Null Data frame\n"));
+
+	/* Construct Qos Null Data frame. */
+	ptr += roundup(null_size, sc->page_size);
+	null_size = urtwm_construct_nulldata(sc, vap, ptr, 1);
+	KASSERT(null_size < sc->page_size,
+	    ("recalculate size for Qos Null Data frame\n"));
+
+	/* Do not try to detect a beacon here. */
+	urtwm_setbits_1_shift(sc, R92C_CR, 0, R92C_CR_ENSWBCN, 1);
+	urtwm_setbits_1_shift(sc, R92C_FWHW_TXQ_CTRL,
+	    R92C_FWHW_TXQ_CTRL_REAL_BEACON, 0, 2);
+	/* Clear 'beacon valid' bit. */
+	urtwm_setbits_1_shift(sc, R92C_TDECTRL, R92C_TDECTRL_BCN_VALID, 0, 2);
+
+	data->buflen = required_size;
+	STAILQ_INSERT_TAIL(&sc->sc_tx_pending, data, next);
+	usbd_transfer_start(sc->sc_xfer[URTWM_BULK_TX_VO]);
+
+	for (ntries = 0; ntries < 10; ntries++) {
+		if (urtwm_read_4(sc, R92C_TDECTRL) & R92C_TDECTRL_BCN_VALID) {
+			URTWM_DPRINTF(sc, URTWM_DEBUG_BEACON,
+			    "%s: frame was recognized\n", __func__);
+			break;
+		}
+		urtwm_delay(sc, 100);
+	}
+	if (ntries == 10) {
+		device_printf(sc->sc_dev, "%s: frame was not recognized!\n",
+		    __func__);
+		return (EINVAL);
+	}
+
+	/* Setup addresses in firmware. */
+	rsvd.probe_resp = 0;
+	rsvd.ps_poll = 0;
+	rsvd.null_data = howmany(bcn_size, sc->page_size);
+	rsvd.null_data_qos = rsvd.null_data + 1;
+	rsvd.null_data_qos_bt = 0;
+	error = urtwm_fw_cmd(sc, R12A_CMD_RSVD_PAGE, &rsvd, sizeof(rsvd));
+	if (error != 0) {
+		device_printf(sc->sc_dev,
+		    "%s: CMD_RSVD_PAGE was not sent, error %d\n",
+		    __func__, error);
+		return (error);
+	}
+
+	/* Re-enable beacon detection. */
+	urtwm_setbits_1_shift(sc, R92C_FWHW_TXQ_CTRL,
+	    R92C_FWHW_TXQ_CTRL_REAL_BEACON, 0, 2);
+	urtwm_setbits_1_shift(sc, R92C_CR, 0, R92C_CR_ENSWBCN, 1);
+
+	/* Setup power management. */
+	/*
+	 * NB: it will be enabled immediately - delay it,
+	 * so 4-Way handshake will not be interrupted.
+	 */
+	callout_reset(&sc->sc_pwrmode_init, 5*hz, urtwm_pwrmode_init, sc);
+
+	return (0);
+}
+
+static void
+urtwm_pwrmode_init(void *arg)
+{
+	struct urtwm_softc *sc = arg;
+
+	urtwm_cmd_sleepable(sc, NULL, 0, urtwm_set_pwrmode_cb);
+}
+
+static void
+urtwm_set_pwrmode_cb(struct urtwm_softc *sc, union sec_param *data)
+{
+	struct ieee80211com *ic = &sc->sc_ic;
+	struct ieee80211vap *vap = TAILQ_FIRST(&ic->ic_vaps);
+
+	if (vap != NULL)
+		urtwm_set_pwrmode(sc, vap, 1);
+}
+
+static int
+urtwm_set_pwrmode(struct urtwm_softc *sc, struct ieee80211vap *vap, int off)
+{
+	struct r12a_fw_cmd_pwrmode mode;
+	int error;
+
+	if (off && vap->iv_state == IEEE80211_S_RUN &&
+	    (vap->iv_flags & IEEE80211_F_PMGTON)) {
+		mode.mode = R12A_PWRMODE_LEG;
+		/*
+		 * TODO: switch to RFOFF state
+		 * (something is missing here - Rx stops with it).
+		 */
+#ifdef URTWM_TODO
+		mode.pwr_state = R12A_PWRMODE_STATE_RFOFF;
+#else
+		mode.pwr_state = R12A_PWRMODE_STATE_RFON;
+#endif
+	} else {
+		mode.mode = R12A_PWRMODE_CAM;
+		mode.pwr_state = R12A_PWRMODE_STATE_ALLON;
+	}
+	mode.pwrb1 =
+	    SM(R12A_PWRMODE_B1_SMART_PS, R12A_PWRMODE_B1_LEG_NULLDATA) |
+	    SM(R12A_PWRMODE_B1_RLBM, R12A_PWRMODE_B1_MODE_MIN);
+	/* XXX ignored */
+	mode.bcn_pass = 0;
+	mode.queue_uapsd = 0;
+	mode.pwrb5 = R12A_PWRMODE_B5_NO_BTCOEX;
+	error = urtwm_fw_cmd(sc, R12A_CMD_SET_PWRMODE, &mode, sizeof(mode));
+	if (error != 0) {
+		device_printf(sc->sc_dev,
+		    "%s: CMD_SET_PWRMODE was not sent, error %d\n",
+		    __func__, error);
+	}
+
+	return (error);
+}
+
+static void
+urtwm_set_media_status(struct urtwm_softc *sc, union sec_param *data)
+{
+	uint8_t macid = data->macid;
+	struct r12a_fw_cmd_msrrpt status;
+	int error;
+
+	if (macid & URTWM_MACID_VALID)
+		status.msrb0 = R12A_MSRRPT_B0_ASSOC;
+	else
+		status.msrb0 = R12A_MSRRPT_B0_DISASSOC;
+
+	status.macid = (macid & ~URTWM_MACID_VALID);
+	status.macid_end = 0;
+
+	error = urtwm_fw_cmd(sc, R12A_CMD_MSR_RPT, &status, sizeof(status));
+	if (error != 0)
+		device_printf(sc->sc_dev, "cannot change media status!\n");
+}
+#endif
 
 static int
 urtwm_key_alloc(struct ieee80211vap *vap, struct ieee80211_key *k,
@@ -3109,6 +3400,10 @@ urtwm_newstate(struct ieee80211vap *vap, enum ieee80211_state nstate, int arg)
 			callout_stop(&uvp->tsf_sync_adhoc);
 		}
 
+		/* Disable power management. */
+		callout_stop(&sc->sc_pwrmode_init);
+		urtwm_set_pwrmode(sc, vap, 0);
+
 		/* Turn link LED off. */
 		urtwm_set_led(sc, URTWM_LED_LINK, 0);
 
@@ -3174,6 +3469,10 @@ urtwm_newstate(struct ieee80211vap *vap, enum ieee80211_state nstate, int arg)
 		/* Set media status to 'Associated'. */
 		urtwm_set_mode(sc, mode, 0);
 
+		/* Set AssocID. */
+		urtwm_write_2(sc, R92C_BCN_PSR_RPT,
+		    0xc000 | IEEE80211_NODE_AID(ni));
+
 		/* Set BSSID. */
 		urtwm_write_4(sc, R92C_BSSID + 0, le32dec(&ni->ni_bssid[0]));
 		urtwm_write_4(sc, R92C_BSSID + 4, le16dec(&ni->ni_bssid[4]));
@@ -3199,6 +3498,12 @@ urtwm_newstate(struct ieee80211vap *vap, enum ieee80211_state nstate, int arg)
 
 			urtwm_write_4(sc, R92C_RCR, reg);
 		}
+
+#ifndef URTWM_WITHOUT_UCODE
+		/* Upload (QoS) Null Data frame to firmware. */
+		if (vap->iv_opmode == IEEE80211_M_STA)
+			urtwm_push_nulldata(sc, vap);
+#endif
 
 		if (vap->iv_opmode == IEEE80211_M_HOSTAP ||
 		    vap->iv_opmode == IEEE80211_M_IBSS) {
@@ -5808,7 +6113,14 @@ urtwm_newassoc(struct ieee80211_node *ni, int isnew)
 	if (id > URTWM_MACID_MAX(sc)) {
 		device_printf(sc->sc_dev, "%s: node table is full\n",
 		    __func__);
+		return;
 	}
+
+#ifndef URTWM_WITHOUT_UCODE
+	/* Notify firmware. */
+	id |= URTWM_MACID_VALID;
+	urtwm_cmd_sleepable(sc, &id, sizeof(id), urtwm_set_media_status);
+#endif
 }
 
 static void
@@ -5818,8 +6130,13 @@ urtwm_node_free(struct ieee80211_node *ni)
 	struct urtwm_node *un = URTWM_NODE(ni);
 
 	URTWM_NT_LOCK(sc);
-	if (un->id != URTWM_MACID_UNDEFINED)
+	if (un->id != URTWM_MACID_UNDEFINED) {
 		sc->node_list[un->id] = NULL;
+#ifndef URTWM_WITHOUT_UCODE
+		urtwm_cmd_sleepable(sc, &un->id, sizeof(un->id),
+		    urtwm_set_media_status);
+#endif
+	}
 	URTWM_NT_UNLOCK(sc);
 
 	sc->sc_node_free(ni);

@@ -36,6 +36,9 @@
 #define R21A_TX_PAGE_COUNT	243
 #define R12A_TX_PAGE_BOUNDARY	(R12A_TX_PAGE_COUNT + 1)
 #define R21A_TX_PAGE_BOUNDARY	(R21A_TX_PAGE_COUNT + 1)
+
+#define R12A_TX_PAGE_SIZE	512
+#define R21A_TX_PAGE_SIZE	256
 #define R12A_RX_DMA_BUFFER_SIZE	0x3e80
 
 #define R92C_H2C_NBOX		4
@@ -1026,10 +1029,68 @@ struct r92c_fw_hdr {
  */
 struct r88e_fw_cmd {
 	uint8_t id;
+#define R12A_CMD_RSVD_PAGE		0x00
+#define R12A_CMD_MSR_RPT		0x01
+#define R12A_CMD_SET_PWRMODE		0x20
 #define R88E_CMD_MACID_CONFIG		0x40
 #define R12A_CMD_IQ_CALIBRATE		0x45
 
 	uint8_t msg[7];
+} __packed;
+
+/* Structure for R12A_CMD_RSVD_PAGE. */
+#define URTWM_BCN_MAX_SIZE		512
+
+struct r12a_fw_cmd_rsvdpage {
+	uint8_t		probe_resp;
+	uint8_t		ps_poll;
+	uint8_t		null_data;
+	uint8_t		null_data_qos;
+	uint8_t		null_data_qos_bt;
+} __packed;
+
+/* Structure for R12A_CMD_MSR_RPT. */
+struct r12a_fw_cmd_msrrpt {
+	uint8_t		msrb0;
+#define R12A_MSRRPT_B0_DISASSOC		0x00
+#define R12A_MSRRPT_B0_ASSOC		0x01
+#define R12A_MSRRPT_B0_MACID_IND	0x02
+
+	uint8_t		macid;
+	uint8_t		macid_end;
+} __packed;
+
+/* Structure for R12A_CMD_SET_PWRMODE. */
+struct r12a_fw_cmd_pwrmode {
+	uint8_t		mode;
+#define R12A_PWRMODE_CAM		0
+#define R12A_PWRMODE_LEG		1
+#define R12A_PWRMODE_UAPSD		2
+
+	uint8_t		pwrb1;
+#define R12A_PWRMODE_B1_RLBM_M		0x0f
+#define R12A_PWRMODE_B1_RLBM_S		0
+#define R12A_PWRMODE_B1_MODE_MIN	0
+#define R12A_PWRMODE_B1_MODE_MAX	1
+#define R12A_PWRMODE_B1_MODE_DTIM	2
+
+#define R12A_PWRMODE_B1_SMART_PS_M	0xf0
+#define R12A_PWRMODE_B1_SMART_PS_S	4
+#define R12A_PWRMODE_B1_LEG_PSPOLL0	0
+#define R12A_PWRMODE_B1_LEG_PSPOLL1	1
+#define R12A_PWRMODE_B1_LEG_NULLDATA	2
+#define R12A_PWRMODE_B1_WMM_PSPOLL	0
+#define R12A_PWRMODE_B1_WMM_NULLDATA	1
+
+	uint8_t		bcn_pass;
+	uint8_t		queue_uapsd;
+	uint8_t		pwr_state;
+#define R12A_PWRMODE_STATE_RFOFF	0x00
+#define R12A_PWRMODE_STATE_RFON		0x04
+#define R12A_PWRMODE_STATE_ALLON	0x0c
+
+	uint8_t		pwrb5;
+#define R12A_PWRMODE_B5_NO_BTCOEX	0x40
 } __packed;
 
 /* Structure for R12A_CMD_MACID_CONFIG. */

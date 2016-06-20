@@ -72,6 +72,7 @@ struct urtwm_softc;
 
 union sec_param {
 	struct ieee80211_key		key;
+	uint8_t				macid;
 };
 
 #define CMD_FUNC_PROTO			void (*func)(struct urtwm_softc *, \
@@ -204,6 +205,8 @@ struct urtwm_softc {
 
 	struct mtx		sc_mtx;
 
+	struct callout		sc_pwrmode_init;
+
 	struct urtwm_cmdq	cmdq[URTWM_CMDQ_SIZE];
         struct mtx		cmdq_mtx;
         struct task		cmdq_task;
@@ -250,6 +253,8 @@ struct urtwm_softc {
 	int				tx_boundary;
 
 	int				npubqpages;  /* XXX for each queue? */
+	int				page_size;
+
 	uint16_t			rx_dma_size;
 };
 
