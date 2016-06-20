@@ -136,6 +136,8 @@ struct urtwm_softc {
 #define URTWM_DETACHED		0x02
 #define URTWM_RUNNING		0x04
 #define URTWM_FW_LOADED		0x08
+#define URTWM_RXCKSUM_EN	0x10
+#define URTWM_RXCKSUM6_EN	0x20
 
 	uint8_t			chip;
 #define URTWM_CHIP_12A		0x01

@@ -312,6 +312,7 @@ static void		urtwm_tx_checksum(struct r12a_tx_desc *);
 static int		urtwm_transmit(struct ieee80211com *, struct mbuf *);
 static void		urtwm_start(struct urtwm_softc *);
 static void		urtwm_parent(struct ieee80211com *);
+static int		urtwm_ioctl_net(struct ieee80211com *, u_long, void *);
 static int		urtwm_r12a_power_on(struct urtwm_softc *);
 static int		urtwm_r21a_power_on(struct urtwm_softc *);
 static void		urtwm_r12a_power_off(struct urtwm_softc *);
@@ -536,6 +537,7 @@ urtwm_attach(device_t self)
 	int error;
 
 	device_set_usb_desc(self);
+	sc->sc_flags = URTWM_RXCKSUM_EN | URTWM_RXCKSUM6_EN;
 	sc->sc_udev = uaa->device;
 	sc->sc_dev = self;
 	if (USB_GET_DRIVER_INFO(uaa) == URTWM_RTL8812A) {
@@ -653,6 +655,7 @@ urtwm_attach(device_t self)
 	ic->ic_set_channel = urtwm_set_channel;
 	ic->ic_transmit = urtwm_transmit;
 	ic->ic_parent = urtwm_parent;
+	ic->ic_ioctl = urtwm_ioctl_net;
 	ic->ic_vap_create = urtwm_vap_create;
 	ic->ic_vap_delete = urtwm_vap_delete;
 	ic->ic_wme.wme_update = urtwm_wme_update;
@@ -791,6 +794,7 @@ urtwm_vap_create(struct ieee80211com *ic, const char name[IFNAMSIZ], int unit,
 	struct urtwm_softc *sc = ic->ic_softc;
 	struct urtwm_vap *uvp;
 	struct ieee80211vap *vap;
+	struct ifnet *ifp;
 
 	if (!TAILQ_EMPTY(&ic->ic_vaps))		/* only one at a time */
 		return (NULL);
@@ -805,6 +809,15 @@ urtwm_vap_create(struct ieee80211com *ic, const char name[IFNAMSIZ], int unit,
 		free(uvp, M_80211_VAP);
 		return (NULL);
 	}
+
+	ifp = vap->iv_ifp;
+	ifp->if_capabilities = IFCAP_RXCSUM | IFCAP_RXCSUM_IPV6;
+	URTWM_LOCK(sc);
+	if (sc->sc_flags & URTWM_RXCKSUM_EN)
+		ifp->if_capenable |= IFCAP_RXCSUM;
+	if (sc->sc_flags & URTWM_RXCKSUM6_EN)
+		ifp->if_capenable |= IFCAP_RXCSUM_IPV6;
+	URTWM_UNLOCK(sc);
 
 	if (opmode == IEEE80211_M_HOSTAP || opmode == IEEE80211_M_IBSS)
 		urtwm_init_beacon(sc, uvp);
@@ -901,7 +914,7 @@ urtwm_rx_copy_to_mbuf(struct urtwm_softc *sc, struct r92c_rx_stat *stat,
 {
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct mbuf *m;
-	uint32_t rxdw0;
+	uint32_t rxdw0, rxdw1;
 	int pktlen;
 
 	URTWM_ASSERT_LOCKED(sc);
@@ -927,6 +940,9 @@ urtwm_rx_copy_to_mbuf(struct urtwm_softc *sc, struct r92c_rx_stat *stat,
 
 	pktlen = MS(rxdw0, R92C_RXDW0_PKTLEN);
 	if (pktlen < sizeof(struct ieee80211_frame_ack)) {
+		/*
+		 * Should not happen (because of Rx filter setup).
+		 */
 		URTWM_DPRINTF(sc, URTWM_DEBUG_RECV,
 		    "%s: frame is too short: %d\n", __func__, pktlen);
 		goto fail;
@@ -942,6 +958,28 @@ urtwm_rx_copy_to_mbuf(struct urtwm_softc *sc, struct r92c_rx_stat *stat,
 	/* Finalize mbuf. */
 	memcpy(mtod(m, uint8_t *), (uint8_t *)stat, totlen);
 	m->m_pkthdr.len = m->m_len = totlen;
+
+	rxdw1 = le32toh(stat->rxdw1);
+	if (rxdw1 & R12A_RXDW1_CKSUM) {
+		URTWM_DPRINTF(sc, URTWM_DEBUG_RECV,
+		    "%s: %s/%s checksum is %s\n", __func__,
+		    (rxdw1 & R12A_RXDW1_UDP) ? "UDP" : "TCP",
+		    (rxdw1 & R12A_RXDW1_IPV6) ? "IPv6" : "IP",
+		    (rxdw1 & R12A_RXDW1_CKSUM_ERR) ? "invalid" : "valid");
+
+		if (rxdw1 & R12A_RXDW1_CKSUM_ERR) {
+			m_freem(m);
+			goto fail;
+		}
+
+		if ((rxdw1 & R12A_RXDW1_IPV6) ?
+		    (sc->sc_flags & URTWM_RXCKSUM6_EN) :
+		    (sc->sc_flags & URTWM_RXCKSUM_EN)) {
+			m->m_pkthdr.csum_flags = CSUM_IP_CHECKED |
+			    CSUM_IP_VALID | CSUM_DATA_VALID | CSUM_PSEUDO_HDR;
+			m->m_pkthdr.csum_data = 0xffff;
+		}
+	}
 
 	return (m);
 fail:
@@ -3850,6 +3888,65 @@ urtwm_parent(struct ieee80211com *ic)
 }
 
 static int
+urtwm_ioctl_net(struct ieee80211com *ic, u_long cmd, void *data)
+{
+	struct urtwm_softc *sc = ic->ic_softc;
+	struct ifreq *ifr = (struct ifreq *)data;
+	int error;
+
+	error = 0;
+	switch (cmd) {
+	case SIOCSIFCAP:
+	{
+		struct ieee80211vap *vap;
+		int changed, rxmask;
+
+		rxmask = ifr->ifr_reqcap & (IFCAP_RXCSUM | IFCAP_RXCSUM_IPV6);
+
+		URTWM_LOCK(sc);
+		changed = 0;
+		if (!(sc->sc_flags & URTWM_RXCKSUM_EN) ^
+		    !(ifr->ifr_reqcap & IFCAP_RXCSUM)) {
+			sc->sc_flags ^= URTWM_RXCKSUM_EN;
+			changed = 1;
+		}
+		if (!(sc->sc_flags & URTWM_RXCKSUM6_EN) ^
+		    !(ifr->ifr_reqcap & IFCAP_RXCSUM_IPV6)) {
+			sc->sc_flags ^= URTWM_RXCKSUM6_EN;
+			changed = 1;
+		}
+		if (changed) {
+			uint32_t rcr;
+
+			rcr = urtwm_read_4(sc, R92C_RCR);
+			if (rxmask == 0)
+				rcr &= ~R12A_RCR_TCP_OFFLD_EN;
+			else
+				rcr |= R12A_RCR_TCP_OFFLD_EN;
+			urtwm_write_4(sc, R92C_RCR, rcr);
+		}
+		URTWM_UNLOCK(sc);
+
+		IEEE80211_LOCK(ic);	/* XXX */
+		TAILQ_FOREACH(vap, &ic->ic_vaps, iv_next) {
+			struct ifnet *ifp = vap->iv_ifp;
+
+			ifp->if_capenable &=
+			    ~(IFCAP_RXCSUM | IFCAP_RXCSUM_IPV6);
+			ifp->if_capenable |= rxmask;
+		}
+		IEEE80211_UNLOCK(ic);
+		break;
+	}
+	default:
+		error = ENOTTY;		/* for net80211 */
+		break;
+	}
+
+	return (error);
+}
+
+static int
 urtwm_r12a_power_on(struct urtwm_softc *sc)
 {
 #define URTWM_CHK(res) do {			\
@@ -5133,7 +5230,11 @@ urtwm_rxfilter_init(struct urtwm_softc *sc)
 
 	rcr = R92C_RCR_AM | R92C_RCR_AB | R92C_RCR_APM |
 	      R92C_RCR_HTC_LOC_CTRL | R92C_RCR_APP_PHYSTS |
-	      R92C_RCR_APP_ICV | R92C_RCR_APP_MIC;
+	      R92C_RCR_APP_ICV | R92C_RCR_APP_MIC |
+	      R12A_RCR_DIS_CHK_14 | R12A_RCR_VHT_ACK;
+
+	if (sc->sc_flags & (URTWM_RXCKSUM_EN | URTWM_RXCKSUM6_EN))
+		rcr |= R12A_RCR_TCP_OFFLD_EN;
 
 	if (vap->iv_opmode == IEEE80211_M_MONITOR) {
 		/* Accept all frames. */
