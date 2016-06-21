@@ -740,20 +740,6 @@ urtwm_detach(device_t self)
 	/* stop all USB transfers */
 	usbd_transfer_unsetup(sc->sc_xfer, URTWM_N_TRANSFER);
 
-	/* Prevent further allocations from RX/TX data lists. */
-	URTWM_LOCK(sc);
-	STAILQ_INIT(&sc->sc_tx_active);
-	STAILQ_INIT(&sc->sc_tx_inactive);
-	STAILQ_INIT(&sc->sc_tx_pending);
-
-	STAILQ_INIT(&sc->sc_rx_active);
-	STAILQ_INIT(&sc->sc_rx_inactive);
-
-	/* Free data buffers. */
-	urtwm_free_tx_list(sc);
-	urtwm_free_rx_list(sc);
-	URTWM_UNLOCK(sc);
-
 	if (ic->ic_softc == sc) {
 		callout_drain(&sc->sc_pwrmode_init);
 		ieee80211_draintask(ic, &sc->cmdq_task);
@@ -1445,12 +1431,19 @@ static void
 urtwm_free_rx_list(struct urtwm_softc *sc)
 {
 	urtwm_free_list(sc, sc->sc_rx, URTWM_RX_LIST_COUNT);
+
+	STAILQ_INIT(&sc->sc_rx_active);
+	STAILQ_INIT(&sc->sc_rx_inactive);
 }
 
 static void
 urtwm_free_tx_list(struct urtwm_softc *sc)
 {
 	urtwm_free_list(sc, sc->sc_tx, URTWM_TX_LIST_COUNT);
+
+	STAILQ_INIT(&sc->sc_tx_active);
+	STAILQ_INIT(&sc->sc_tx_inactive);
+	STAILQ_INIT(&sc->sc_tx_pending);
 }
 
 static void
@@ -6773,6 +6766,8 @@ urtwm_stop(struct urtwm_softc *sc)
 
 	urtwm_abort_xfers(sc);
 	urtwm_drain_mbufq(sc);
+	urtwm_free_tx_list(sc);
+	urtwm_free_rx_list(sc);
 	urtwm_power_off(sc);
 	URTWM_UNLOCK(sc);
 }
