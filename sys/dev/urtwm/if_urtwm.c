@@ -109,10 +109,8 @@ enum {
 #define URTWM_DPRINTF(_sc, _m, ...)	do { (void) sc; } while (0)
 #endif
 
-#ifdef URTWM_TODO
 static int urtwm_enable_11n = 0;
 TUNABLE_INT("hw.usb.urtwm.enable_11n", &urtwm_enable_11n);
-#endif
 
 /* various supported device vendors/products */
 static const STRUCT_USB_HOST_ID urtwm_devs[] = {
@@ -378,6 +376,7 @@ static void		urtwm_scan_curchan(struct ieee80211_scan_state *,
 static void		urtwm_scan_end(struct ieee80211com *);
 static void		urtwm_getradiocaps(struct ieee80211com *, int, int *,
 			    struct ieee80211_channel[]);
+static void		urtwm_update_chw(struct ieee80211com *);
 static void		urtwm_set_channel(struct ieee80211com *);
 static int		urtwm_wme_update(struct ieee80211com *);
 static void		urtwm_update_slot(struct ieee80211com *);
@@ -635,25 +634,25 @@ urtwm_attach(device_t self)
 	    IEEE80211_CRYPTO_TKIP |
 	    IEEE80211_CRYPTO_AES_CCM;
 
-#ifdef URTWM_TODO
-	/* Assume they're all 11n capable for now */
 	if (urtwm_enable_11n) {
 		device_printf(self, "enabling 11n\n");
 		ic->ic_htcaps = IEEE80211_HTC_HT |
-#if 0
+#ifdef URTWM_TODO
 		    IEEE80211_HTC_AMPDU |
-#endif
 		    IEEE80211_HTC_AMSDU |
 		    IEEE80211_HTCAP_MAXAMSDU_3839 |
-		    IEEE80211_HTCAP_SMPS_OFF;
+#endif
+		    IEEE80211_HTCAP_SMPS_OFF
+		    ;
 		/* no HT40 just yet */
-		// ic->ic_htcaps |= IEEE80211_HTCAP_CHWIDTH40;
+#ifdef URTWM_TODO
+		ic->ic_htcaps |= IEEE80211_HTCAP_CHWIDTH40;
+#endif
 
-		/* XXX TODO: verify chains versus streams for urtwn */
+		/* XXX TODO: verify chains versus streams for urtwm */
 		ic->ic_txstream = sc->ntxchains;
 		ic->ic_rxstream = sc->nrxchains;
 	}
-#endif
 
 	/* Enable TX watchdog */
 #ifdef D4054
@@ -670,6 +669,7 @@ urtwm_attach(device_t self)
 	ic->ic_scan_curchan = urtwm_scan_curchan;
 	ic->ic_scan_end = urtwm_scan_end;
 	ic->ic_getradiocaps = urtwm_getradiocaps;
+	ic->ic_update_chw = urtwm_update_chw;
 	ic->ic_set_channel = urtwm_set_channel;
 	ic->ic_transmit = urtwm_transmit;
 	ic->ic_parent = urtwm_parent;
@@ -1273,6 +1273,8 @@ tr_setup:
 				(void)ieee80211_input(ni, m,
 				    URTWN_NODE(ni)->last_rssi - nf, nf);
 #else
+				if (ni->ni_flags & IEEE80211_NODE_HT)
+					m->m_flags |= M_AMPDU;
 				(void)ieee80211_input(ni, m, rssi - nf, nf);
 #endif
 				ieee80211_free_node(ni);
@@ -5858,12 +5860,21 @@ urtwm_getradiocaps(struct ieee80211com *ic,
 	memset(bands, 0, sizeof(bands));
 	setbit(bands, IEEE80211_MODE_11B);
 	setbit(bands, IEEE80211_MODE_11G);
+	if (urtwm_enable_11n)
+		setbit(bands, IEEE80211_MODE_11NG);
 	ieee80211_add_channel_list_2ghz(chans, maxchans, nchans,
 	    urtwm_chan_2ghz, nitems(urtwm_chan_2ghz), bands, 0);
 
 	setbit(bands, IEEE80211_MODE_11A);
+	if (urtwm_enable_11n)
+		setbit(bands, IEEE80211_MODE_11NA);
 	ieee80211_add_channel_list_5ghz(chans, maxchans, nchans,
 	    urtwm_chan_5ghz, nitems(urtwm_chan_5ghz), bands, 0);
+}
+
+static void
+urtwm_update_chw(struct ieee80211com *ic)
+{
 }
 
 static void
