@@ -22,7 +22,7 @@
 __FBSDID("$FreeBSD$");
 
 /*
- * Driver for Realtek RTL8821AU.
+ * Driver for Realtek RTL8812AU/RTL8821AU.
  */
 #include "opt_wlan.h"
 
@@ -553,11 +553,8 @@ urtwm_attach(device_t self)
 	sc->sc_flags = URTWM_RXCKSUM_EN | URTWM_RXCKSUM6_EN;
 	sc->sc_udev = uaa->device;
 	sc->sc_dev = self;
-	if (USB_GET_DRIVER_INFO(uaa) == URTWM_RTL8812A) {
+	if (USB_GET_DRIVER_INFO(uaa) == URTWM_RTL8812A)
 		sc->chip |= URTWM_CHIP_12A;
-		device_printf(sc->sc_dev, "RTL8812AU is not supported yet!\n");
-		goto detach;
-	}
 
 #ifdef USB_DEBUG
 	int debug;
