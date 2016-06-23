@@ -349,6 +349,7 @@ static void		urtwm_rf_init(struct urtwm_softc *);
 static int		urtwm_rf_init_chain(struct urtwm_softc *,
 			    const struct urtwm_rf_prog *, int);
 static void		urtwm_arfb_init(struct urtwm_softc *);
+static void		urtwm_r21a_bypass_ext_lna_2ghz(struct urtwm_softc *);
 static void		urtwm_r12a_set_band_2ghz(struct urtwm_softc *);
 static void		urtwm_r21a_set_band_2ghz(struct urtwm_softc *);
 static void		urtwm_r12a_set_band_5ghz(struct urtwm_softc *);
@@ -394,7 +395,6 @@ static void		urtwm_newassoc(struct ieee80211_node *, int);
 static void		urtwm_node_free(struct ieee80211_node *);
 static void		urtwm_fix_spur(struct urtwm_softc *,
 			    struct ieee80211_channel *);
-static void		urtwm_spur_calib(struct urtwm_softc *, uint16_t);
 static void		urtwm_set_chan(struct urtwm_softc *,
 		    	    struct ieee80211_channel *);
 static void		urtwm_antsel_init(struct urtwm_softc *);
@@ -2184,12 +2184,11 @@ urtwm_r21a_check_condition(struct urtwm_softc *sc, const uint8_t cond[])
 		mask |= R21A_COND_EXT_PA_5G;
 	if (sc->ext_lna_5g)
 		mask |= R21A_COND_EXT_LNA_5G;
+	if (sc->bt_coex)
+		mask |= R21A_COND_BT;
 	if (!sc->ext_pa_2g && !sc->ext_lna_2g &&
-	    !sc->ext_pa_5g && !sc->ext_lna_5g)
+	    !sc->ext_pa_5g && !sc->ext_lna_5g && !sc->bt_coex)
 		mask = R21A_COND_BOARD_DEF;
-
-	/* XXX BT? */
-	/* XXX board type? */
 
 	if (mask == 0)
 		return (0);
@@ -2237,6 +2236,7 @@ urtwm_config_specific(struct urtwm_softc *sc)
 		sc->page_count = R12A_TX_PAGE_COUNT;
 		sc->pktbuf_count = R12A_TXPKTBUF_COUNT;
 		sc->tx_boundary = R12A_TX_PAGE_BOUNDARY;
+		sc->tx_agg_desc_num = 1;
 		sc->npubqpages = R12A_PUBQ_NPAGES;
 		sc->page_size = R12A_TX_PAGE_SIZE;
 		sc->rx_dma_size = R12A_RX_DMA_BUFFER_SIZE;
@@ -2272,12 +2272,21 @@ urtwm_config_specific(struct urtwm_softc *sc)
 		sc->page_count = R21A_TX_PAGE_COUNT;
 		sc->pktbuf_count = R12A_TXPKTBUF_COUNT;
 		sc->tx_boundary = R21A_TX_PAGE_BOUNDARY;
+		sc->tx_agg_desc_num = 6;
 		sc->npubqpages = R12A_PUBQ_NPAGES;
 		sc->page_size = R21A_TX_PAGE_SIZE;
 		sc->rx_dma_size = R12A_RX_DMA_BUFFER_SIZE;
 
 		sc->ntxchains = 1;
 		sc->nrxchains = 1;
+	}
+
+	if (usbd_get_speed(sc->sc_udev) == USB_SPEED_SUPER) {
+		sc->ac_usb_dma_size = 0x07;
+		sc->ac_usb_dma_time = 0x1a;
+	} else {
+		sc->ac_usb_dma_size = 0x01;
+		sc->ac_usb_dma_time = 0x10;
 	}
 }
 
@@ -2291,6 +2300,10 @@ urtwm_config_specific_rom(struct urtwm_softc *sc)
 			sc->sc_set_led = urtwm_r12a_set_led_mini;
 		else
 			sc->sc_set_led = urtwm_r12a_set_led;
+
+		if (!(sc->ext_pa_2g || sc->ext_lna_2g ||
+		    sc->ext_pa_5g || sc->ext_lna_5g))
+			sc->mac_prog = &rtl8812au_mac_no_ext_pa_lna[0];
 	} else {
 		if (sc->board_type == R92C_BOARD_TYPE_MINICARD ||
 		    sc->board_type == R92C_BOARD_TYPE_SOLO ||
@@ -2341,6 +2354,9 @@ urtwm_r12a_parse_rom(struct urtwm_softc *sc, struct r12a_rom *rom)
 	sc->ext_pa_5g = R12A_ROM_IS_PA_EXT_5GHZ(pa_type);
 	sc->ext_lna_2g = R21A_ROM_IS_LNA_EXT(lna_type_2g);
 	sc->ext_lna_5g = R21A_ROM_IS_LNA_EXT(lna_type_5g);
+	sc->bt_coex = (MS(rom->rf_board_opt, R92C_ROM_RF1_BOARD_TYPE) ==
+	    R92C_BOARD_TYPE_HIGHPA);
+	sc->bt_ant_num = (rom->rf_bt_opt & R12A_RF_BT_OPT_ANT_NUM);
 
 	if (sc->ext_pa_2g) {
 		sc->type_pa_2g =
@@ -2402,6 +2418,12 @@ urtwm_r21a_parse_rom(struct urtwm_softc *sc, struct r12a_rom *rom)
 	sc->ext_pa_5g = R21A_ROM_IS_PA_EXT_5GHZ(pa_type);
 	sc->ext_lna_2g = R21A_ROM_IS_LNA_EXT(lna_type_2g);
 	sc->ext_lna_5g = R21A_ROM_IS_LNA_EXT(lna_type_5g);
+
+	URTWM_LOCK(sc);
+	sc->bt_coex =
+	    !!(urtwm_read_4(sc, R92C_MULTI_FUNC_CTRL) & R92C_MULTI_BT_FUNC_EN);
+	URTWM_UNLOCK(sc);
+	sc->bt_ant_num = (rom->rf_bt_opt & R12A_RF_BT_OPT_ANT_NUM);
 
 	/* Read MAC address. */
 	IEEE80211_ADDR_COPY(sc->sc_ic.ic_macaddr, rom->macaddr_21a);
@@ -4308,10 +4330,6 @@ urtwm_r12a_power_on(struct urtwm_softc *sc)
 		return (ETIMEDOUT);
 	}
 
-	/* Disable HWPDN. */
-	URTWM_CHK(urtwm_setbits_1_shift(sc, R92C_APS_FSMCO,
-	    R92C_APS_FSMCO_APDM_HPDN, 0, 1));
-
 	/* Disable WL suspend. */
 	URTWM_CHK(urtwm_setbits_1_shift(sc, R92C_APS_FSMCO,
 	    R92C_APS_FSMCO_AFSM_HSUS, 0, 1));
@@ -4720,12 +4738,14 @@ static void
 urtwm_r12a_fw_reset(struct urtwm_softc *sc)
 {
 	/* Reset MCU IO wrapper. */
+	urtwm_setbits_1(sc, R92C_RSV_CTRL, 0x02, 0);
 	urtwm_setbits_1(sc, R92C_RSV_CTRL + 1, 0x08, 0);
 
 	urtwm_setbits_1_shift(sc, R92C_SYS_FUNC_EN,
 	    R92C_SYS_FUNC_EN_CPUEN, 0, 1);
 
 	/* Enable MCU IO wrapper. */
+	urtwm_setbits_1(sc, R92C_RSV_CTRL, 0x02, 0);
 	urtwm_setbits_1(sc, R92C_RSV_CTRL + 1, 0, 0x08);
 
 	urtwm_setbits_1_shift(sc, R92C_SYS_FUNC_EN,
@@ -4737,12 +4757,14 @@ urtwm_r21a_fw_reset(struct urtwm_softc *sc)
 {
 
 	/* Reset MCU IO wrapper. */
+	urtwm_setbits_1(sc, R92C_RSV_CTRL, 0x02, 0);
 	urtwm_setbits_1(sc, R92C_RSV_CTRL + 1, 0x01, 0);
 
 	urtwm_setbits_1_shift(sc, R92C_SYS_FUNC_EN,
 	    R92C_SYS_FUNC_EN_CPUEN, 0, 1);
 
 	/* Enable MCU IO wrapper. */
+	urtwm_setbits_1(sc, R92C_RSV_CTRL, 0x02, 0);
 	urtwm_setbits_1(sc, R92C_RSV_CTRL + 1, 0, 0x01);
 
 	urtwm_setbits_1_shift(sc, R92C_SYS_FUNC_EN,
@@ -4844,7 +4866,7 @@ urtwm_load_firmware(struct urtwm_softc *sc)
 	/* MCU firmware download enable. */
 	urtwm_setbits_1(sc, R92C_MCUFWDL, 0, R92C_MCUFWDL_EN);
 	/* 8051 reset. */
-	urtwm_setbits_1(sc, R92C_MCUFWDL + 2, 0x08, 0);
+	urtwm_setbits_1_shift(sc, R92C_MCUFWDL, R92C_MCUFWDL_ROM_DLEN, 0, 2);
 
 	for (ntries = 0; ntries < 3; ntries++) {
 		ptr2 = ptr;
@@ -4969,7 +4991,7 @@ urtwm_dma_init(struct urtwm_softc *sc)
 	URTWM_CHK(urtwm_write_1(sc, R92C_TRXFF_BNDY, sc->tx_boundary));
 	URTWM_CHK(urtwm_write_1(sc, R92C_TDECTRL + 1, sc->tx_boundary));
 
-	if (URTWM_CHIP_IS_21A(sc)) {	/* XXX use another macro */
+	if (URTWM_CHIP_HAS_BCNQ1(sc)) {
 		URTWM_CHK(urtwm_write_1(sc, R88E_TXPKTBUF_BCNQ1_BDNY,
 		    sc->tx_boundary + 8));	/* XXX hardcoded */
 		URTWM_CHK(urtwm_write_1(sc, R12A_DWBCN1_CTRL + 1,
@@ -5092,30 +5114,8 @@ urtwm_bb_init(struct urtwm_softc *sc)
 
 	urtwm_crystalcap_write(sc);
 
-	if (URTWM_CHIP_IS_12A(sc)) {
-		/* XXX cannot happen yet. */
-		if (sc->ntxchains == 1 && sc->nrxchains == 1) {
-			/* BB OFDM Rx path A. */
-			urtwm_bb_setbits(sc, R12A_RX_PATH, 0xff, 0x11);
-			/* BB OFDM Tx path A. */
-			urtwm_bb_setbits(sc, R12A_TX_PATH, 0xfffffff, 0x1111);
-			/* BB CCK R/Rx path A. */
-			urtwm_bb_setbits(sc, R12A_CCK_RX_PATH, 0x0c000000, 0);
-			/* MCS support. */
-			urtwm_bb_setbits(sc, 0x8bc, 0xc0000060, 0);
-			/* RF Path B HSSI off. */
-			urtwm_bb_setbits(sc, R12A_HSSI_PARAM1(1), 0x0f, 0x04);
-			/* RF Path B power down. */
-			urtwm_bb_write(sc, R12A_LSSI_PARAM(1), 0);
-			/* ADDA Path B off. */
-			urtwm_bb_write(sc, R12A_AFE_POWER_1(1), 0);
-			urtwm_bb_write(sc, R12A_AFE_POWER_2(1), 0);
-		}
-
-		if (urtwm_bb_read(sc, R12A_CCK_RPT_FORMAT) &
-		    R12A_CCK_RPT_FORMAT_HIPWR)
-			sc->sc_flags |= URTWM_FLAG_CCK_HIPWR;
-	}
+	if (urtwm_bb_read(sc, R12A_CCK_RPT_FORMAT) & R12A_CCK_RPT_FORMAT_HIPWR)
+		sc->sc_flags |= URTWM_FLAG_CCK_HIPWR;
 }
 
 static void
@@ -5216,14 +5216,23 @@ urtwm_arfb_init(struct urtwm_softc *sc)
 }
 
 static void
+urtwm_r21a_bypass_ext_lna_2ghz(struct urtwm_softc *sc)
+{
+	urtwm_bb_setbits(sc, R12A_RFE_INV(0), 0x00100000, 0);
+	urtwm_bb_setbits(sc, R12A_RFE_INV(0), 0x00400000, 0);
+	urtwm_bb_setbits(sc, R12A_RFE_PINMUX(0), 0, 0x07);
+	urtwm_bb_setbits(sc, R12A_RFE_PINMUX(0), 0, 0x0700);
+}
+
+static void
 urtwm_r12a_set_band_2ghz(struct urtwm_softc *sc)
 {
-	/* Stop Tx / Rx. */
+	/* Enable CCK / OFDM. */
 	urtwm_bb_setbits(sc, R12A_OFDMCCK_EN,
-	    R12A_OFDMCCK_EN_CCK | R12A_OFDMCCK_EN_OFDM, 0);
+	    0, R12A_OFDMCCK_EN_CCK | R12A_OFDMCCK_EN_OFDM);
 
-	urtwm_bb_setbits(sc, R12A_PWED_TH, 0x0e, 0x08);
-	urtwm_bb_setbits(sc, R12A_BW_INDICATION, 0x03, 0x01);
+	urtwm_bb_setbits(sc, R12A_BW_INDICATION, 0x02, 0x01);
+	urtwm_bb_setbits(sc, R12A_PWED_TH, 0x3e000, 0x2e000);
 
 	/* Select AGC table. */
 	urtwm_bb_setbits(sc, R12A_TXAGC_TABLE_SELECT, 0x03, 0);
@@ -5260,13 +5269,16 @@ urtwm_r12a_set_band_2ghz(struct urtwm_softc *sc)
 		break;
 	}
 
-	/* Write basic rates (1, 5.5, 11, 6, 12, 24). */
-	/* XXX check ic_curmode. */
-	urtwm_setbits_4(sc, R92C_RRSR, R92C_RRSR_RATE_BITMAP_M, 0x15d);
+	urtwm_bb_setbits(sc, R12A_TX_PATH, 0xf0, 0x10);
+	urtwm_bb_setbits(sc, R12A_CCK_RX_PATH, 0x0f000000, 0x01000000);
 
-	/* Enable CCK. */
-	urtwm_bb_setbits(sc, R12A_OFDMCCK_EN, 0,
-	    R12A_OFDMCCK_EN_CCK | R12A_OFDMCCK_EN_OFDM);
+	/* Write basic rates (1, 2, 5.5, 11, 6, 12, 24). */
+	/* XXX check ic_curmode. */
+	urtwm_setbits_4(sc, R92C_RRSR, R92C_RRSR_RATE_BITMAP_M,
+	   (1 << URTWM_RIDX_CCK1)  | (1 << URTWM_RIDX_CCK2) |
+	   (1 << URTWM_RIDX_CCK55) | (1 << URTWM_RIDX_CCK11) |
+	   (1 << URTWM_RIDX_OFDM6) | (1 << URTWM_RIDX_OFDM12) |
+	   (1 << URTWM_RIDX_OFDM24));
 
 	urtwm_write_1(sc, R12A_CCK_CHECK, 0);
 }
@@ -5274,34 +5286,40 @@ urtwm_r12a_set_band_2ghz(struct urtwm_softc *sc)
 static void
 urtwm_r21a_set_band_2ghz(struct urtwm_softc *sc)
 {
-	/* Stop Tx / Rx. */
+	/* Enable CCK / OFDM. */
 	urtwm_bb_setbits(sc, R12A_OFDMCCK_EN,
-	    R12A_OFDMCCK_EN_CCK | R12A_OFDMCCK_EN_OFDM, 0);
+	    0, R12A_OFDMCCK_EN_CCK | R12A_OFDMCCK_EN_OFDM);
 
 	/* Turn off RF PA and LNA. */
 	urtwm_bb_setbits(sc, R12A_RFE_PINMUX(0),
-	    R12A_RFE_PINMUX_LNA_MASK, 0x7);
+	    R12A_RFE_PINMUX_LNA_MASK, 0x7000);
 	urtwm_bb_setbits(sc, R12A_RFE_PINMUX(0),
-	    R12A_RFE_PINMUX_PA_A_MASK, 0x7);
+	    R12A_RFE_PINMUX_PA_A_MASK, 0x70);
 
 	if (sc->ext_lna_2g) {
 		/* Turn on 2.4 GHz external LNA. */
 		urtwm_bb_setbits(sc, R12A_RFE_INV(0), 0, 0x00100000);
 		urtwm_bb_setbits(sc, R12A_RFE_INV(0), 0x00400000, 0);
-		urtwm_bb_setbits(sc, R12A_RFE_PINMUX(0), 0x7, 0x2);
-		urtwm_bb_setbits(sc, R12A_RFE_PINMUX(0), 0x700, 0x200);
+		urtwm_bb_setbits(sc, R12A_RFE_PINMUX(0), 0x05, 0x02);
+		urtwm_bb_setbits(sc, R12A_RFE_PINMUX(0), 0x0500, 0x0200);
+	} else {
+		/* Bypass 2.4 GHz external LNA. */
+		urtwm_r21a_bypass_ext_lna_2ghz(sc);
 	}
 
 	/* Select AGC table. */
 	urtwm_bb_setbits(sc, R12A_TX_SCALE(0), 0x0f00, 0);
 
-	/* Write basic rates (1, 5.5, 11, 6, 12, 24). */
-	/* XXX check ic_curmode. */
-	urtwm_setbits_4(sc, R92C_RRSR, R92C_RRSR_RATE_BITMAP_M, 0x15d);
+	urtwm_bb_setbits(sc, R12A_TX_PATH, 0xf0, 0x10);
+	urtwm_bb_setbits(sc, R12A_CCK_RX_PATH, 0x0f000000, 0x01000000);
 
-	/* Enable CCK. */
-	urtwm_bb_setbits(sc, R12A_OFDMCCK_EN, 0,
-	    R12A_OFDMCCK_EN_CCK | R12A_OFDMCCK_EN_OFDM);
+	/* Write basic rates (1, 2, 5.5, 11, 6, 12, 24). */
+	/* XXX check ic_curmode. */
+	urtwm_setbits_4(sc, R92C_RRSR, R92C_RRSR_RATE_BITMAP_M,
+	   (1 << URTWM_RIDX_CCK1)  | (1 << URTWM_RIDX_CCK2) |
+	   (1 << URTWM_RIDX_CCK55) | (1 << URTWM_RIDX_CCK11) |
+	   (1 << URTWM_RIDX_OFDM6) | (1 << URTWM_RIDX_OFDM12) |
+	   (1 << URTWM_RIDX_OFDM24));
 
 	urtwm_write_1(sc, R12A_CCK_CHECK, 0);
 }
@@ -5325,12 +5343,12 @@ urtwm_r12a_set_band_5ghz(struct urtwm_softc *sc)
 		    __func__, urtwm_read_2(sc, R12A_TXPKT_EMPTY));
 	}
 
-	/* Stop Tx / Rx. */
-	urtwm_bb_setbits(sc, R12A_OFDMCCK_EN,
-	    R12A_OFDMCCK_EN_CCK | R12A_OFDMCCK_EN_OFDM, 0);
+	/* Enable OFDM. */
+	urtwm_bb_setbits(sc, R12A_OFDMCCK_EN, R12A_OFDMCCK_EN_CCK,
+	    R12A_OFDMCCK_EN_OFDM);
 
-	urtwm_bb_setbits(sc, R12A_PWED_TH, 0x0e, 0x03);
-	urtwm_bb_setbits(sc, R12A_BW_INDICATION, 0x03, 0x02);
+	urtwm_bb_setbits(sc, R12A_BW_INDICATION, 0x01, 0x02);
+	urtwm_bb_setbits(sc, R12A_PWED_TH, 0x3e000, 0x2a000);
 
 	/* Select AGC table. */
 	urtwm_bb_setbits(sc, R12A_TXAGC_TABLE_SELECT, 0x03, 0x01);
@@ -5372,12 +5390,14 @@ urtwm_r12a_set_band_5ghz(struct urtwm_softc *sc)
 		break;
 	}
 
+	urtwm_bb_setbits(sc, R12A_TX_PATH, 0xf0, 0);
+	urtwm_bb_setbits(sc, R12A_CCK_RX_PATH, 0, 0x0f000000);
+
 	/* Write basic rates (6, 12, 24). */
 	/* XXX obtain from net80211. */
-	urtwm_setbits_4(sc, R92C_RRSR, R92C_RRSR_RATE_BITMAP_M, 0x150);
-
-	/* Enable OFDM. */
-	urtwm_bb_setbits(sc, R12A_OFDMCCK_EN, 0, R12A_OFDMCCK_EN_OFDM);
+	urtwm_setbits_4(sc, R92C_RRSR, R92C_RRSR_RATE_BITMAP_M,
+	    (1 << URTWM_RIDX_OFDM6) | (1 << URTWM_RIDX_OFDM12) |
+	    (1 << URTWM_RIDX_OFDM24));
 }
 
 static void
@@ -5386,16 +5406,13 @@ urtwm_r21a_set_band_5ghz(struct urtwm_softc *sc)
 	int ntries;
 
 	urtwm_bb_setbits(sc, R12A_RFE_PINMUX(0),
-	    R12A_RFE_PINMUX_LNA_MASK, 0x5);
+	    R12A_RFE_PINMUX_LNA_MASK, 0x5000);
 	urtwm_bb_setbits(sc, R12A_RFE_PINMUX(0),
-	    R12A_RFE_PINMUX_PA_A_MASK, 0x4);
+	    R12A_RFE_PINMUX_PA_A_MASK, 0x40);
 
 	if (sc->ext_lna_2g) {
 		/* Bypass 2.4 GHz external LNA. */
-		urtwm_bb_setbits(sc, R12A_RFE_INV(0), 0x00100000, 0);
-		urtwm_bb_setbits(sc, R12A_RFE_INV(0), 0x00400000, 0);
-		urtwm_bb_setbits(sc, R12A_RFE_PINMUX(0), 0, 0x7);
-		urtwm_bb_setbits(sc, R12A_RFE_PINMUX(0), 0, 0x700);
+		urtwm_r21a_bypass_ext_lna_2ghz(sc);
 	}
 
 	urtwm_write_1(sc, R12A_CCK_CHECK, 0x80);
@@ -5412,19 +5429,21 @@ urtwm_r21a_set_band_5ghz(struct urtwm_softc *sc)
 		    __func__, urtwm_read_2(sc, R12A_TXPKT_EMPTY));
 	}
 
-	/* Stop Tx / Rx. */
-	urtwm_bb_setbits(sc, R12A_OFDMCCK_EN,
-	    R12A_OFDMCCK_EN_CCK | R12A_OFDMCCK_EN_OFDM, 0);
+	/* Enable OFDM. */
+	urtwm_bb_setbits(sc, R12A_OFDMCCK_EN, R12A_OFDMCCK_EN_CCK,
+	    R12A_OFDMCCK_EN_OFDM);
 
 	/* Select AGC table. */
 	urtwm_bb_setbits(sc, R12A_TX_SCALE(0), 0x0f00, 0x0100);
 
+	urtwm_bb_setbits(sc, R12A_TX_PATH, 0xf0, 0);
+	urtwm_bb_setbits(sc, R12A_CCK_RX_PATH, 0, 0x0f000000);
+
 	/* Write basic rates (6, 12, 24). */
 	/* XXX obtain from net80211. */
-	urtwm_setbits_4(sc, R92C_RRSR, R92C_RRSR_RATE_BITMAP_M, 0x150);
-
-	/* Enable OFDM. */
-	urtwm_bb_setbits(sc, R12A_OFDMCCK_EN, 0, R12A_OFDMCCK_EN_OFDM);
+	urtwm_setbits_4(sc, R92C_RRSR, R92C_RRSR_RATE_BITMAP_M,
+	    (1 << URTWM_RIDX_OFDM6) | (1 << URTWM_RIDX_OFDM12) |
+	    (1 << URTWM_RIDX_OFDM24));
 }
 
 static void
@@ -6196,57 +6215,6 @@ urtwm_fix_spur(struct urtwm_softc *sc, struct ieee80211_channel *c)
 }
 
 static void
-urtwm_spur_calib(struct urtwm_softc *sc, uint16_t chan)
-{
-	/* Reset */
-	urtwm_bb_setbits(sc, 0x878, 0x0100, 0xc0);
-	urtwm_bb_setbits(sc, 0x878, 0x01, 0);
-	urtwm_bb_setbits(sc, 0x87c, 0x2000, 0);
-	urtwm_bb_write(sc, 0x880, 0);
-	urtwm_bb_write(sc, 0x884, 0);
-	urtwm_bb_write(sc, 0x898, 0);
-	urtwm_bb_write(sc, 0x89c, 0);
-
-	/* Register setting 1 (False Alarm). */
-	if (chan == 149 || chan == 151 || chan == 153 || chan == 155) {
-		urtwm_bb_setbits(sc, 0x878, 0xc0, 0x0100);
-		urtwm_bb_setbits(sc, 0x878, 0, 0x01);
-		urtwm_bb_setbits(sc, 0x87c, 0, 0x2000);
-	}
-
-	/* Register setting 2 (SINR). */
-	urtwm_bb_setbits(sc, 0x874, 0, 0x200000);
-	urtwm_bb_setbits(sc, 0x874, 0, 0x01);
-
-	switch (chan) {
-	case 42:
-	case 58:
-	case 106:
-	case 122:
-	case 138:
-		urtwm_bb_write(sc, 0x89c, 0x00000001);
-		break;
-	case 149:
-	case 165:
-		urtwm_bb_write(sc, 0x884, 0x00010000);
-		break;
-	case 151:
-	case 167:
-		urtwm_bb_write(sc, 0x880, 0x00010000);
-		break;
-	case 153:
-	case 169:
-		urtwm_bb_write(sc, 0x89c, 0x00010000);
-		break;
-	case 155:
-		urtwm_bb_write(sc, 0x898, 0x00010000);
-		break;
-	default:
-		break;
-	}
-}
-
-static void
 urtwm_set_chan(struct urtwm_softc *sc, struct ieee80211_channel *c)
 {
 	struct ieee80211com *ic = &sc->sc_ic;
@@ -6288,17 +6256,17 @@ urtwm_set_chan(struct urtwm_softc *sc, struct ieee80211_channel *c)
 		if (URTWM_CHIP_IS_12A(sc))
 			urtwm_fix_spur(sc, c);
 
+		KASSERT(chan <= 0xff, ("%s: chan %d\n", __func__, chan));
 		urtwm_rf_setbits(sc, i, R92C_RF_CHNLBW, 0xff, chan);
 	}
-
-	if (URTWM_CHIP_IS_12A(sc) && (sc->rfe_type == 4 || sc->ext_pa_5g))
-		urtwm_spur_calib(sc, chan);
 
 #ifdef notyet
 	if (IEEE80211_IS_CHAN_HT80(c)) {	/* 80 MHz */
 		urtwm_setbits_2(sc, R12A_WMAC_TRXPTCL_CTL, 0x80, 0x100);
 
 		/* TODO */
+
+		val = 0x0;
 	} else
 #endif
 	if (IEEE80211_IS_CHAN_HT40(c)) {	/* 40 MHz */
@@ -6338,11 +6306,7 @@ urtwm_set_chan(struct urtwm_softc *sc, struct ieee80211_channel *c)
 		else
 			urtwm_bb_setbits(sc, R92C_CCK0_SYSTEM, 0, 0x10);
 
-		if (URTWM_CHIP_IS_12A(sc))
-			urtwm_fix_spur(sc, c);
-
-		for (i = 0; i < 2; i++)
-			urtwm_rf_setbits(sc, i, R92C_RF_CHNLBW, 0x800, 0x400);
+		val = 0x400;
 	} else {	/* 20 MHz */
 		urtwm_setbits_2(sc, R12A_WMAC_TRXPTCL_CTL, 0x180, 0);
 		urtwm_write_1(sc, R12A_DATA_SEC, R12A_DATA_SEC_NO_EXT);
@@ -6357,12 +6321,14 @@ urtwm_set_chan(struct urtwm_softc *sc, struct ieee80211_channel *c)
 
 		urtwm_bb_setbits(sc, R12A_L1_PEAK_TH, 0x03c00000, val);
 
-		if (URTWM_CHIP_IS_12A(sc))
-			urtwm_fix_spur(sc, c);
-
-		for (i = 0; i < 2; i++)
-			urtwm_rf_setbits(sc, i, R92C_RF_CHNLBW, 0, 0xc00);
+		val = 0xc00;
 	}
+
+	if (URTWM_CHIP_IS_12A(sc))
+		urtwm_fix_spur(sc, c);
+
+	for (i = 0; i < 2; i++)
+		urtwm_rf_setbits(sc, i, R92C_RF_CHNLBW, 0xc00, val);
 
 	/* Set Tx power for this new channel. */
 	urtwm_set_txpower(sc, c);
@@ -6558,8 +6524,8 @@ urtwm_init(struct urtwm_softc *sc)
 		goto fail;
 
 	/* Drop incorrect TX. */
-	urtwm_setbits_2(sc, R92C_TXDMA_OFFSET_CHK, 0,
-	    R92C_TXDMA_OFFSET_DROP_DATA_EN);
+	urtwm_setbits_1_shift(sc, R92C_TXDMA_OFFSET_CHK, 0,
+	    R92C_TXDMA_OFFSET_DROP_DATA_EN, 1);
 
 	/* Set info size in Rx descriptors (in 64-bit words). */
 	urtwm_write_1(sc, R92C_RX_DRVINFO_SZ, R92C_RX_DRVINFO_SZ_DEF);
@@ -6598,20 +6564,14 @@ urtwm_init(struct urtwm_softc *sc)
 
 	/* Setup USB aggregation. */
 	/* Tx aggregation. */
-	if (URTWM_CHIP_IS_12A(sc)) {
-		urtwm_setbits_4(sc, R92C_TDECTRL,
-		    R92C_TDECTRL_BLK_DESC_NUM_M, 3);
-	} else {
-		urtwm_setbits_4(sc, R92C_TDECTRL,
-		    R92C_TDECTRL_BLK_DESC_NUM_M, 6);
-		urtwm_write_1(sc, R12A_DWBCN1_CTRL, (6 << 1));
-	}
+	urtwm_setbits_4(sc, R92C_TDECTRL,
+	    R92C_TDECTRL_BLK_DESC_NUM_M, sc->tx_agg_desc_num);
+	if (URTWM_CHIP_HAS_BCNQ1(sc))
+		urtwm_write_1(sc, R12A_DWBCN1_CTRL, sc->tx_agg_desc_num << 1);
 
-	/* Rx aggregation (DMA). */
-	if (usbd_get_speed(sc->sc_udev) == USB_SPEED_SUPER)
-		urtwm_write_2(sc, R92C_RXDMA_AGG_PG_TH, 0x1a7);
-	else
-		urtwm_write_2(sc, R92C_RXDMA_AGG_PG_TH, 0x106);
+	/* Rx aggregation (USB). */
+	urtwm_write_2(sc, R92C_RXDMA_AGG_PG_TH,
+	    sc->ac_usb_dma_size | (sc->ac_usb_dma_time << 8));
 	urtwm_setbits_1(sc, R92C_TRXDMA_CTRL, 0,
 	    R92C_TRXDMA_CTRL_RXDMA_AGG_EN);
 
@@ -6645,16 +6605,14 @@ urtwm_init(struct urtwm_softc *sc)
 	    urtwm_read_1(sc, R92C_TYPE_ID + 3) & 0x80)	{
 		if ((urtwm_read_1(sc, R92C_USB_INFO) & 0x30) == 0) {
 			/* Set burst packet length to 512 B. */
-			urtwm_setbits_1(sc, R12A_RXDMA_PRO, 0x20, 0x10);
-			urtwm_write_2(sc, R12A_RXDMA_PRO, 0x1e);
+			urtwm_setbits_1(sc, R12A_RXDMA_PRO, 0x20, 0x1e);
 		} else {
 			/* Set burst packet length to 64 B. */
-			urtwm_setbits_1(sc, R12A_RXDMA_PRO, 0x10, 0x20);
+			urtwm_setbits_1(sc, R12A_RXDMA_PRO, 0x10, 0x2e);
 		}
 	} else {	/* USB 3.0 */
 		/* Set burst packet length to 1 KB. */
-		urtwm_setbits_1(sc, R12A_RXDMA_PRO, 0x30, 0);
-		urtwm_write_2(sc, R12A_RXDMA_PRO, 0x0e);
+		urtwm_setbits_1(sc, R12A_RXDMA_PRO, 0x30, 0x0e);
 
 		urtwm_setbits_1(sc, 0xf008, 0x18, 0);
 	}
@@ -6668,12 +6626,12 @@ urtwm_init(struct urtwm_softc *sc)
 
 	urtwm_write_1(sc, R92C_PIFS, 0);
 
+	urtwm_write_2(sc, R92C_MAX_AGGR_NUM, 0x1f1f);
+
 	if (URTWM_CHIP_IS_12A(sc)) {
-		urtwm_write_1(sc, R92C_MAX_AGGR_NUM, 0x1f);
 		urtwm_setbits_1(sc, R92C_FWHW_TXQ_CTRL,
 		    R92C_FWHW_TXQ_CTRL_AMPDU_RTY_NEW, 0);
 	} else {
-		urtwm_write_2(sc, R92C_MAX_AGGR_NUM, 0x0a0a);
 		urtwm_write_1(sc, R92C_FWHW_TXQ_CTRL,
 		    R92C_FWHW_TXQ_CTRL_AMPDU_RTY_NEW);
 		urtwm_write_4(sc, R92C_FAST_EDCA_CTRL, 0x03087777);
@@ -6685,7 +6643,7 @@ urtwm_init(struct urtwm_softc *sc)
 	urtwm_arfb_init(sc);
 
 	/* Init MACTXEN / MACRXEN after setting RxFF boundary. */
-	urtwm_setbits_2(sc, R92C_CR, 0, R92C_CR_MACTXEN | R92C_CR_MACRXEN);
+	urtwm_setbits_1(sc, R92C_CR, 0, R92C_CR_MACTXEN | R92C_CR_MACRXEN);
 
 	/* Initialize BB/RF blocks. */
 	urtwm_bb_init(sc);
@@ -6846,7 +6804,6 @@ end:
 		m_freem(m);
 
 	URTWM_UNLOCK(sc);
-
 	
 	return (error);
 }

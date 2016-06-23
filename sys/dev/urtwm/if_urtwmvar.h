@@ -147,6 +147,8 @@ struct urtwm_softc {
 #define URTWM_CHIP_IS_12A(_sc)	!!((_sc)->chip & URTWM_CHIP_12A)
 #define URTWM_CHIP_IS_21A(_sc)	!((_sc)->chip & URTWM_CHIP_12A)
 
+#define URTWM_CHIP_HAS_BCNQ1(_sc)	URTWM_CHIP_IS_21A(_sc)
+
 	int			ext_pa_2g:1,
 				ext_pa_5g:1,
 				ext_lna_2g:1,
@@ -154,7 +156,9 @@ struct urtwm_softc {
 				type_pa_2g:4,
 				type_pa_5g:4,
 				type_lna_2g:4,
-				type_lna_5g:4;
+				type_lna_5g:4,
+				bt_coex:1,
+				bt_ant_num:1;
 
 	uint8_t			board_type;
 	uint8_t			regulatory;
@@ -234,7 +238,9 @@ struct urtwm_softc {
 	int8_t		(*sc_get_rssi_cck)(struct urtwm_softc *, void *);
 	int		(*sc_power_on)(struct urtwm_softc *);
 	void		(*sc_power_off)(struct urtwm_softc *);
+#ifndef URTWM_WITHOUT_UCODE
 	void		(*sc_fw_reset)(struct urtwm_softc *);
+#endif
 	int		(*sc_set_page_size)(struct urtwm_softc *);
 	void		(*sc_crystalcap_write)(struct urtwm_softc *);
 	void		(*sc_set_band_2ghz)(struct urtwm_softc *);
@@ -251,6 +257,10 @@ struct urtwm_softc {
 	int				page_count;
 	int				pktbuf_count;
 	int				tx_boundary;
+
+	int				tx_agg_desc_num;
+	int				ac_usb_dma_size;
+	int				ac_usb_dma_time;
 
 	int				npubqpages;  /* XXX for each queue? */
 	int				page_size;
