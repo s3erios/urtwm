@@ -5917,6 +5917,7 @@ urtwm_set_channel(struct ieee80211com *ic)
 static int
 urtwm_wme_update(struct ieee80211com *ic)
 {
+	struct ieee80211_channel *c = ic->ic_curchan;
 	struct urtwm_softc *sc = ic->ic_softc;
 	struct wmeParams *wmep = sc->cap_wmeParams;
 	uint8_t aifs, acm, slottime;
@@ -5936,7 +5937,9 @@ urtwm_wme_update(struct ieee80211com *ic)
 	URTWM_LOCK(sc);
 	for (ac = WME_AC_BE; ac < WME_NUM_AC; ac++) {
 		/* AIFS[AC] = AIFSN[AC] * aSlotTime + aSIFSTime. */
-		aifs = wmep[ac].wmep_aifsn * slottime + IEEE80211_DUR_SIFS;
+		aifs = wmep[ac].wmep_aifsn * slottime +
+		    (IEEE80211_IS_CHAN_5GHZ(c) ?
+			IEEE80211_DUR_OFDM_SIFS : IEEE80211_DUR_SIFS);
 		urtwm_write_4(sc, wme2queue[ac].reg,
 		    SM(R92C_EDCA_PARAM_TXOP, wmep[ac].wmep_txopLimit) |
 		    SM(R92C_EDCA_PARAM_ECWMIN, wmep[ac].wmep_logcwmin) |
@@ -5978,12 +5981,15 @@ urtwm_update_slot_cb(struct urtwm_softc *sc, union sec_param *data)
 static void
 urtwm_update_aifs(struct urtwm_softc *sc, uint8_t slottime)
 {
+	struct ieee80211_channel *c = sc->sc_ic.ic_curchan;
 	const struct wmeParams *wmep = sc->cap_wmeParams;
 	uint8_t aifs, ac;
 
 	for (ac = WME_AC_BE; ac < WME_NUM_AC; ac++) {
 		/* AIFS[AC] = AIFSN[AC] * aSlotTime + aSIFSTime. */
-		aifs = wmep[ac].wmep_aifsn * slottime + IEEE80211_DUR_SIFS;
+		aifs = wmep[ac].wmep_aifsn * slottime +
+		    (IEEE80211_IS_CHAN_5GHZ(c) ?
+			IEEE80211_DUR_OFDM_SIFS : IEEE80211_DUR_SIFS);
 		urtwm_write_1(sc, wme2queue[ac].reg, aifs);
 	}
 }
