@@ -5,7 +5,7 @@ FreeBSD driver for RTL8812AU/RTL8821AU
 
 1) Clone / download this repository.  
 2) Apply 'patch-usbdevs.diff' to your source tree checkout; e.g.  
-  *cd /usr/src/ && svn patch <patch-usbdevs.diff location>*  
+  *cd /usr/src/ && svn patch \<patch-usbdevs.diff location\>*  
 3) Build and install firmware:  
    *cd \<repository location\>/sys/modules/urtwmfw && make && make install*  
 4) Build and install driver:  
