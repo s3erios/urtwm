@@ -2074,16 +2074,19 @@ urtwm_setup_endpoints(struct urtwm_softc *sc)
 		urtwm_config[URTWM_BULK_TX_BE].endpoint = addr[2];
 		urtwm_config[URTWM_BULK_TX_BK].endpoint = addr[2];
 		urtwm_config[URTWM_BULK_TX_VI].endpoint = addr[1];
+		break;
 	case 2:
 		urtwm_config[URTWM_BULK_TX_BE].endpoint = addr[1];
 		urtwm_config[URTWM_BULK_TX_BK].endpoint = addr[1];
 		urtwm_config[URTWM_BULK_TX_VI].endpoint = addr[0];
+		break;
 	case 1:
 		urtwm_config[URTWM_BULK_TX_BE].endpoint = addr[0];
 		urtwm_config[URTWM_BULK_TX_BK].endpoint = addr[0];
 		urtwm_config[URTWM_BULK_TX_VI].endpoint = addr[0];
+		break;
 	default:
-		/* NOTREACHED */
+		KASSERT(1, ("unhandled number of endpoints %d\n", sc->ntx));
 		break;
 	}
 
