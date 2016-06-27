@@ -1203,17 +1203,10 @@ urtwm_rx_frame(struct urtwm_softc *sc, struct mbuf *m, int8_t *rssi_p)
 		/* XXX shortgi? */
 
 		/* Map HW rate index to 802.11 rate. */
-		/* XXX HT check does not work. */
-#ifdef URTWM_TODO
-		if (!(rxdw3 & R92C_RXDW3_HT)) {
-#else
-		if (rate < URTWM_RIDX_MCS(0)) {
-#endif
+		if (rate < URTWM_RIDX_MCS(0))
 			tap->wr_rate = ridx2rate[rate];
-		} else if (rate >= URTWM_RIDX_MCS(0)) {		/* MCS0~15. */
-			/* Bit 7 set means HT MCS instead of rate. */
-			tap->wr_rate = 0x80 | (rate - 12);
-		}
+		else	/* MCS0~15. */
+			tap->wr_rate = IEEE80211_RATE_MCS | (rate - 12);
 
 		/* XXX TODO: this isn't right; should use the last good RSSI */
 		tap->wr_dbm_antsignal = rssi;
