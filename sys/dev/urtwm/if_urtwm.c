@@ -163,6 +163,10 @@ static void		urtwm_vap_clear_tx(struct urtwm_softc *,
 			    struct ieee80211vap *);
 static void		urtwm_vap_clear_tx_queue(struct urtwm_softc *,
 			    urtwm_datahead *, struct ieee80211vap *);
+#ifdef IEEE80211_SUPPORT_SUPERG
+static void		urtwm_ff_flush_all(struct urtwm_softc *,
+			    union sec_param *);
+#endif
 static struct mbuf *	urtwm_rx_copy_to_mbuf(struct urtwm_softc *,
 			    struct r92c_rx_stat *, int);
 static struct mbuf *	urtwm_report_intr(struct urtwm_softc *,
@@ -622,8 +626,8 @@ urtwm_attach(device_t self)
 		| IEEE80211_C_WME		/* 802.11e */
 #ifdef URTWM_TODO
 		| IEEE80211_C_SWAMSDUTX		/* Do software A-MSDU TX */
-		| IEEE80211_C_FF		/* Atheros fast-frames */
 #endif
+		| IEEE80211_C_FF		/* Atheros fast-frames */
 		;
 
 	ic->ic_cryptocaps =
@@ -910,6 +914,25 @@ urtwm_vap_clear_tx_queue(struct urtwm_softc *sc, urtwm_datahead *head,
 	}
 }
 
+#ifdef IEEE80211_SUPPORT_SUPERG
+static void
+urtwm_ff_flush_all(struct urtwm_softc *sc, union sec_param *data)
+{
+	struct ieee80211com *ic = &sc->sc_ic;
+
+	URTWM_UNLOCK(sc);
+#ifdef D6958
+	ieee80211_ff_flush_all(ic);
+#else
+	ieee80211_ff_flush(ic, WME_AC_VO);
+	ieee80211_ff_flush(ic, WME_AC_VI);
+	ieee80211_ff_flush(ic, WME_AC_BE);
+	ieee80211_ff_flush(ic, WME_AC_BK);
+#endif
+	URTWM_LOCK(sc);
+}
+#endif
+
 static struct mbuf *
 urtwm_rx_copy_to_mbuf(struct urtwm_softc *sc, struct r92c_rx_stat *stat,
     int totlen)
@@ -1088,6 +1111,13 @@ urtwm_ratectl_tx_complete(struct urtwm_softc *sc, void *buf, int len)
 		    "%s: macid %d, ni is NULL\n", __func__, rpt->macid);
 	}
 	URTWM_NT_UNLOCK(sc);
+
+#ifdef IEEE80211_SUPPORT_SUPERG
+	/* NB: this will be never executed when firmware is not loaded. */
+	if (sc->sc_tx_n_active > 0)
+		if (--sc->sc_tx_n_active <= 1)
+			urtwm_cmd_sleepable(sc, NULL, 0, urtwm_ff_flush_all);
+#endif
 }
 
 static struct mbuf *
@@ -1304,18 +1334,18 @@ tr_setup:
 		break;
 	}
 finish:
-#ifdef URTWM_TODO
 	/* Finished receive; age anything left on the FF queue by a little bump */
 	/*
 	 * XXX TODO: just make this a callout timer schedule so we can
 	 * flush the FF staging queue if we're approaching idle.
 	 */
 #ifdef	IEEE80211_SUPPORT_SUPERG
-	URTWN_UNLOCK(sc);
-	ieee80211_ff_age_all(ic, 1);
-	URTWN_LOCK(sc);
+	if (!(sc->sc_flags & URTWM_FW_LOADED)) {
+		URTWM_UNLOCK(sc);
+		ieee80211_ff_age_all(ic, 1);
+		URTWM_LOCK(sc);
+	}
 #endif
-#endif	/* URTWM_TODO */
 
 	/* Kick-start more transmit in case we stalled */
 	urtwm_start(sc);
@@ -1330,8 +1360,9 @@ urtwm_txeof(struct urtwm_softc *sc, struct urtwm_data *data, int status)
 	if (data->ni != NULL)	/* not a beacon frame */
 		ieee80211_tx_complete(data->ni, data->m, status);
 
-	if (sc->sc_tx_n_active > 0)
-		sc->sc_tx_n_active--;
+	if (!(sc->sc_flags & URTWM_FW_LOADED))
+		if (sc->sc_tx_n_active > 0)
+			sc->sc_tx_n_active--;
 
 	data->ni = NULL;
 	data->m = NULL;
@@ -1449,11 +1480,6 @@ static void
 urtwm_bulk_tx_callback(struct usb_xfer *xfer, usb_error_t error)
 {
 	struct urtwm_softc *sc = usbd_xfer_softc(xfer);
-#ifdef URTWM_TODO
-#ifdef	IEEE80211_SUPPORT_SUPERG
-	struct ieee80211com *ic = &sc->sc_ic;
-#endif
-#endif
 	struct urtwm_data *data;
 
 	URTWM_ASSERT_LOCKED(sc);
@@ -1479,7 +1505,8 @@ tr_setup:
 		STAILQ_INSERT_TAIL(&sc->sc_tx_active, data, next);
 		usbd_xfer_set_frame_data(xfer, 0, data->buf, data->buflen);
 		usbd_transfer_submit(xfer);
-		sc->sc_tx_n_active++;
+		if (!(sc->sc_flags & URTWM_FW_LOADED))
+			sc->sc_tx_n_active++;
 		break;
 	default:
 		data = STAILQ_FIRST(&sc->sc_tx_active);
@@ -1494,14 +1521,13 @@ tr_setup:
 		break;
 	}
 finish:
-#ifdef URTWM_TODO
 #ifdef	IEEE80211_SUPPORT_SUPERG
 	/*
 	 * If the TX active queue drops below a certain
 	 * threshold, ensure we age fast-frames out so they're
 	 * transmitted.
 	 */
-	if (sc->sc_tx_n_active <= 1) {
+	if (!(sc->sc_flags & URTWM_FW_LOADED) && sc->sc_tx_n_active <= 1) {
 		/* XXX ew - net80211 should defer this for us! */
 
 		/*
@@ -1516,15 +1542,9 @@ finish:
 		 * XXX TODO: just make this a callout timer schedule so we can
 		 * flush the FF staging queue if we're approaching idle.
 		 */
-		URTWN_UNLOCK(sc);
-		ieee80211_ff_flush(ic, WME_AC_VO);
-		ieee80211_ff_flush(ic, WME_AC_VI);
-		ieee80211_ff_flush(ic, WME_AC_BE);
-		ieee80211_ff_flush(ic, WME_AC_BK);
-		URTWN_LOCK(sc);
+		urtwm_cmd_sleepable(sc, NULL, 0, urtwm_ff_flush_all);
 	}
 #endif
-#endif	/* URTWM_TODO */
 	/* Kick-start more transmit */
 	urtwm_start(sc);
 }
@@ -3905,6 +3925,8 @@ urtwm_tx_data(struct urtwm_softc *sc, struct ieee80211_node *ni,
 
 			txd->txdw2 |= htole32(R12A_TXDW2_AGGBK);
 			txd->txdw2 |= htole32(R12A_TXDW2_SPE_RPT);
+			if (sc->sc_flags & URTWM_FW_LOADED)
+				sc->sc_tx_n_active++;
 
 			if (ic->ic_flags & IEEE80211_F_SHPREAMBLE)
 				txd->txdw5 |= htole32(R12A_TXDW5_SHPRE);
