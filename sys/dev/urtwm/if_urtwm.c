@@ -3857,13 +3857,12 @@ urtwm_tx_data(struct urtwm_softc *sc, struct ieee80211_node *ni,
 			(void) ieee80211_ratectl_rate(ni, NULL, 0);
 			rate = ni->ni_txrate;
 		} else {
-			/* XXX TODO: drop the default rate for 11b/11g? */
 			if (ni->ni_flags & IEEE80211_NODE_HT)
 				rate = IEEE80211_RATE_MCS | 0x4; /* MCS4 */
 			else if (ic->ic_curmode != IEEE80211_MODE_11B)
-				rate = 108;
+				rate = ridx2rate[URTWM_RIDX_OFDM36];
 			else
-				rate = 22;
+				rate = ridx2rate[URTWM_RIDX_CCK55];
 		}
 	}
 
