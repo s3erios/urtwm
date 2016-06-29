@@ -631,9 +631,7 @@ urtwm_attach(device_t self)
 	    IEEE80211_CRYPTO_AES_CCM;
 
 	ic->ic_htcaps = IEEE80211_HTC_HT |
-#ifdef URTWM_TODO
 	    IEEE80211_HTC_AMPDU |
-#endif
 	    IEEE80211_HTC_AMSDU |
 	    IEEE80211_HTCAP_MAXAMSDU_3839 |
 	    IEEE80211_HTCAP_SMPS_OFF
@@ -827,6 +825,10 @@ urtwm_vap_create(struct ieee80211com *ic, const char name[IFNAMSIZ], int unit,
 	vap->iv_key_set = urtwm_key_set;
 	vap->iv_key_delete = urtwm_key_delete;
 	vap->iv_max_aid = URTWM_MACID_MAX(sc) + 1;
+
+	/* 802.11n parameters */
+	vap->iv_ampdu_density = IEEE80211_HTCAP_MPDUDENSITY_16;
+	vap->iv_ampdu_rxmax = IEEE80211_HTCAP_MAXRXAMPDU_64K;
 
 	if (opmode == IEEE80211_M_IBSS) {
 		uvp->recv_mgmt = vap->iv_recv_mgmt;
@@ -3904,7 +3906,15 @@ urtwm_tx_data(struct urtwm_softc *sc, struct ieee80211_node *ni,
 		if (type == IEEE80211_FC0_TYPE_DATA) {
 			qsel = tid % URTWM_MAX_TID;
 
-			txd->txdw2 |= htole32(R12A_TXDW2_AGGBK);
+			if (m->m_flags & M_AMPDU_MPDU) {
+				txd->txdw2 |= htole32(R12A_TXDW2_AGGEN);
+				txd->txdw2 |= htole32(SM(R12A_TXDW2_AMPDU_DEN,
+				    vap->iv_ampdu_density));
+				txd->txdw3 |= htole32(SM(R12A_TXDW3_MAX_AGG,
+				    0x1f));	/* XXX */
+			} else
+				txd->txdw2 |= htole32(R12A_TXDW2_AGGBK);
+
 			txd->txdw2 |= htole32(R12A_TXDW2_SPE_RPT);
 			if (sc->sc_flags & URTWM_FW_LOADED)
 				sc->sc_tx_n_active++;
@@ -3931,8 +3941,6 @@ urtwm_tx_data(struct urtwm_softc *sc, struct ieee80211_node *ni,
 	txd->txdw1 |= htole32(SM(R12A_TXDW1_QSEL, qsel));
 
 	/* XXX TODO: 40MHZ flag? */
-	/* XXX TODO: AMPDU flag? (AGG_ENABLE or AGG_BREAK?) Density shift? */
-	/* XXX Short preamble? */
 	/* XXX Short-GI? */
 
 	txd->txdw1 |= htole32(SM(R12A_TXDW1_MACID, macid));
@@ -3949,9 +3957,18 @@ urtwm_tx_data(struct urtwm_softc *sc, struct ieee80211_node *ni,
 		/* Use HW sequence numbering for non-QoS frames. */
 		txd->txdw8 |= htole32(R12A_TXDW8_HWSEQ_EN);
 	} else {
+		uint16_t seqno;
+
+		if (m->m_flags & M_AMPDU_MPDU) {
+			seqno = ni->ni_txseqs[tid];
+			/* NB: clear Fragment Number field. */
+			*(uint16_t *)wh->i_seq = 0;
+			ni->ni_txseqs[tid]++;
+		} else
+			seqno = M_SEQNO_GET(m) % IEEE80211_SEQ_RANGE;
+
 		/* Set sequence number. */
-		txd->txdw9 |= htole32(SM(R12A_TXDW9_SEQ,
-		    M_SEQNO_GET(m) % IEEE80211_SEQ_RANGE));
+		txd->txdw9 |= htole32(SM(R12A_TXDW9_SEQ, seqno));
 	}
 
 	if (k != NULL && !(k->wk_flags & IEEE80211_KEY_SWCRYPT)) {
