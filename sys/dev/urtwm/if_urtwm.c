@@ -109,9 +109,6 @@ enum {
 #define URTWM_DPRINTF(_sc, _m, ...)	do { (void) sc; } while (0)
 #endif
 
-static int urtwm_enable_11n = 0;
-TUNABLE_INT("hw.usb.urtwm.enable_11n", &urtwm_enable_11n);
-
 /* various supported device vendors/products */
 static const STRUCT_USB_HOST_ID urtwm_devs[] = {
 #define URTWM_DEV(v,p)  { USB_VP(USB_VENDOR_##v, USB_PRODUCT_##v##_##p) }
@@ -624,9 +621,7 @@ urtwm_attach(device_t self)
 #endif
 		| IEEE80211_C_WPA		/* 802.11i */
 		| IEEE80211_C_WME		/* 802.11e */
-#ifdef URTWM_TODO
 		| IEEE80211_C_SWAMSDUTX		/* Do software A-MSDU TX */
-#endif
 		| IEEE80211_C_FF		/* Atheros fast-frames */
 		;
 
@@ -635,25 +630,21 @@ urtwm_attach(device_t self)
 	    IEEE80211_CRYPTO_TKIP |
 	    IEEE80211_CRYPTO_AES_CCM;
 
-	if (urtwm_enable_11n) {
-		device_printf(self, "enabling 11n\n");
-		ic->ic_htcaps = IEEE80211_HTC_HT |
+	ic->ic_htcaps = IEEE80211_HTC_HT |
 #ifdef URTWM_TODO
-		    IEEE80211_HTC_AMPDU |
-		    IEEE80211_HTC_AMSDU |
-		    IEEE80211_HTCAP_MAXAMSDU_3839 |
+	    IEEE80211_HTC_AMPDU |
 #endif
-		    IEEE80211_HTCAP_SMPS_OFF
-		    ;
-		/* no HT40 just yet */
+	    IEEE80211_HTC_AMSDU |
+	    IEEE80211_HTCAP_MAXAMSDU_3839 |
+	    IEEE80211_HTCAP_SMPS_OFF
+	    ;
+	/* no HT40 just yet */
 #ifdef URTWM_TODO
-		ic->ic_htcaps |= IEEE80211_HTCAP_CHWIDTH40;
+	ic->ic_htcaps |= IEEE80211_HTCAP_CHWIDTH40;
 #endif
 
-		/* XXX TODO: verify chains versus streams for urtwm */
-		ic->ic_txstream = sc->ntxchains;
-		ic->ic_rxstream = sc->nrxchains;
-	}
+	ic->ic_txstream = sc->ntxchains;
+	ic->ic_rxstream = sc->nrxchains;
 
 	/* Enable TX watchdog */
 #ifdef D4054
@@ -1176,6 +1167,9 @@ urtwm_rx_frame(struct urtwm_softc *sc, struct mbuf *m, int8_t *rssi_p)
 	stat = mtod(m, struct r92c_rx_stat *);
 	rxdw0 = le32toh(stat->rxdw0);
 	rxdw3 = le32toh(stat->rxdw3);
+#if 1
+	printf("rxdw1 %08X\n", stat->rxdw1);
+#endif
 
 	rate = MS(rxdw3, R92C_RXDW3_RATE);
 	cipher = MS(rxdw0, R92C_RXDW0_CIPHER);
@@ -5898,14 +5892,12 @@ urtwm_getradiocaps(struct ieee80211com *ic,
 	memset(bands, 0, sizeof(bands));
 	setbit(bands, IEEE80211_MODE_11B);
 	setbit(bands, IEEE80211_MODE_11G);
-	if (urtwm_enable_11n)
-		setbit(bands, IEEE80211_MODE_11NG);
+	setbit(bands, IEEE80211_MODE_11NG);
 	ieee80211_add_channel_list_2ghz(chans, maxchans, nchans,
 	    urtwm_chan_2ghz, nitems(urtwm_chan_2ghz), bands, 0);
 
 	setbit(bands, IEEE80211_MODE_11A);
-	if (urtwm_enable_11n)
-		setbit(bands, IEEE80211_MODE_11NA);
+	setbit(bands, IEEE80211_MODE_11NA);
 	ieee80211_add_channel_list_5ghz(chans, maxchans, nchans,
 	    urtwm_chan_5ghz, nitems(urtwm_chan_5ghz), bands, 0);
 }
