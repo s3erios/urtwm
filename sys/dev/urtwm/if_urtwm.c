@@ -1026,7 +1026,6 @@ urtwm_report_intr(struct urtwm_softc *sc, struct usb_xfer *xfer,
 	stat = (struct r92c_rx_stat *)buf;
 	rxdw2 = le32toh(stat->rxdw2);
 
-	/* XXX FF flushing? */
 	if (rxdw2 & R12A_RXDW2_RPT_C2H)
 		urtwm_c2h_report(sc, (uint8_t *)&stat[1], len - sizeof(*stat));
 	else
