@@ -87,7 +87,7 @@ struct urtwm_cmdq {
 struct urtwm_node {
 	struct ieee80211_node	ni;	/* must be the first */
 	uint8_t			id;
-	int			last_rssi;
+	int8_t			last_rssi;
 };
 #define URTWM_NODE(ni)	((struct urtwm_node *)(ni))
 
@@ -187,6 +187,7 @@ struct urtwm_softc {
 	int			ntx;
 	int			ledlink;
 	int			sc_ant;
+	int8_t			last_rssi;
 
 	const char		*fwname;
 	uint16_t		fwsig;

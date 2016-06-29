@@ -1154,22 +1154,20 @@ urtwm_rxeof(struct urtwm_softc *sc, uint8_t *buf, int len)
 }
 
 static struct ieee80211_node *
-urtwm_rx_frame(struct urtwm_softc *sc, struct mbuf *m, int8_t *rssi_p)
+urtwm_rx_frame(struct urtwm_softc *sc, struct mbuf *m, int8_t *rssi)
 {
 	struct ieee80211com *ic = &sc->sc_ic;
+	struct ieee80211_node *ni;
 	struct ieee80211_frame_min *wh;
+	struct urtwm_node *un;
 	struct r92c_rx_stat *stat;
 	uint32_t rxdw0, rxdw3;
 	uint8_t rate, cipher;
-	int8_t rssi = -127;
 	int infosz;
 
 	stat = mtod(m, struct r92c_rx_stat *);
 	rxdw0 = le32toh(stat->rxdw0);
 	rxdw3 = le32toh(stat->rxdw3);
-#if 1
-	printf("rxdw1 %08X\n", stat->rxdw1);
-#endif
 
 	rate = MS(rxdw3, R92C_RXDW3_RATE);
 	cipher = MS(rxdw0, R92C_RXDW0_CIPHER);
@@ -1177,9 +1175,11 @@ urtwm_rx_frame(struct urtwm_softc *sc, struct mbuf *m, int8_t *rssi_p)
 
 	/* Get RSSI from PHY status descriptor if present. */
 	if (infosz != 0 && (rxdw0 & R92C_RXDW0_PHYST)) {
-		rssi = urtwm_get_rssi(sc, rate, &stat[1]);
-		URTWM_DPRINTF(sc, URTWM_DEBUG_RSSI, "%s: rssi=%d\n", __func__, rssi);
-	}
+		*rssi = urtwm_get_rssi(sc, rate, &stat[1]);
+		URTWM_DPRINTF(sc, URTWM_DEBUG_RSSI, "%s: rssi=%d\n", __func__,
+		    *rssi);
+	} else
+		*rssi = -127;
 
 	if (ieee80211_radiotap_active(ic)) {
 		struct urtwm_rx_radiotap_header *tap = &sc->sc_rxtap;
@@ -1202,12 +1202,9 @@ urtwm_rx_frame(struct urtwm_softc *sc, struct mbuf *m, int8_t *rssi_p)
 		else	/* MCS0~15. */
 			tap->wr_rate = IEEE80211_RATE_MCS | (rate - 12);
 
-		/* XXX TODO: this isn't right; should use the last good RSSI */
-		tap->wr_dbm_antsignal = rssi;
+		tap->wr_dbm_antsignal = *rssi;
 		tap->wr_dbm_antnoise = URTWM_NOISE_FLOOR;
 	}
-
-	*rssi_p = rssi;
 
 	/* Drop descriptor. */
 	m_adj(m, sizeof(*stat) + infosz);
@@ -1219,9 +1216,23 @@ urtwm_rx_frame(struct urtwm_softc *sc, struct mbuf *m, int8_t *rssi_p)
 	}
 
 	if (m->m_len >= sizeof(*wh))
-		return (ieee80211_find_rxnode(ic, wh));
+		ni = ieee80211_find_rxnode(ic, wh);
+	else
+		ni = NULL;
 
-	return (NULL);
+	un = URTWM_NODE(ni);
+	if (*rssi != -127) {
+		sc->last_rssi = *rssi;
+		if (un != NULL)
+			un->last_rssi = *rssi;
+	} else {
+		*rssi = (un != NULL) ? un->last_rssi : sc->last_rssi;
+
+		if (ieee80211_radiotap_active(ic))
+			sc->sc_rxtap.wr_dbm_antsignal = *rssi;
+	}
+
+	return (ni);
 }
 
 static void
@@ -1269,38 +1280,17 @@ tr_setup:
 
 			ni = urtwm_rx_frame(sc, m, &rssi);
 
-#ifdef URTWM_TODO
-			/* Store a global last-good RSSI */
-			if (rssi != -127)
-				sc->last_rssi = rssi;
-#endif
-
 			URTWM_UNLOCK(sc);
 
 			nf = URTWM_NOISE_FLOOR;
 			if (ni != NULL) {
-#ifdef URTWM_TODO
-				if (rssi != -127)
-					URTWN_NODE(ni)->last_rssi = rssi;
-				if (ni->ni_flags & IEEE80211_NODE_HT)
-					m->m_flags |= M_AMPDU;
-				(void)ieee80211_input(ni, m,
-				    URTWN_NODE(ni)->last_rssi - nf, nf);
-#else
 				if (ni->ni_flags & IEEE80211_NODE_HT)
 					m->m_flags |= M_AMPDU;
 				(void)ieee80211_input(ni, m, rssi - nf, nf);
-#endif
 				ieee80211_free_node(ni);
 			} else {
-#ifdef URTWM_TODO
-				/* Use last good global RSSI */
-				(void)ieee80211_input_all(ic, m,
-				    sc->last_rssi - nf, nf);
-#else
 				(void)ieee80211_input_all(ic, m,
 				    rssi - nf, nf);
-#endif
 			}
 			URTWM_LOCK(sc);
 			m = next;
