@@ -97,6 +97,7 @@ enum {
 	URTWM_DEBUG_TXPWR	= 0x00000800,	/* dump Tx power values */
 	URTWM_DEBUG_RSSI	= 0x00001000,	/* dump RSSI lookups */
 	URTWM_DEBUG_RESET	= 0x00002000,	/* initialization progress */
+	URTWM_DEBUG_CALIB	= 0x00004000,	/* calibration progress */
 	URTWM_DEBUG_ANY		= 0xffffffff
 };
 
@@ -298,11 +299,9 @@ static void		urtwm_adhoc_recv_mgmt(struct ieee80211_node *,
 			    const struct ieee80211_rx_stats *, int, int);
 static int		urtwm_newstate(struct ieee80211vap *,
 			    enum ieee80211_state, int);
-#ifdef URTWM_TODO
 static void		urtwm_calib_to(void *);
 static void		urtwm_calib_cb(struct urtwm_softc *,
 			    union sec_param *);
-#endif
 static int8_t		urtwm_r12a_get_rssi_cck(struct urtwm_softc *, void *);
 static int8_t		urtwm_r21a_get_rssi_cck(struct urtwm_softc *, void *);
 static int8_t		urtwm_get_rssi_ofdm(struct urtwm_softc *, void *);
@@ -399,11 +398,14 @@ static void		urtwm_fix_spur(struct urtwm_softc *,
 static void		urtwm_set_chan(struct urtwm_softc *,
 		    	    struct ieee80211_channel *);
 static void		urtwm_antsel_init(struct urtwm_softc *);
-#ifdef URTWM_TODO
+static void		urtwm_iq_calib_sw(struct urtwm_softc *);
+#ifndef URTWM_WITHOUT_UCODE
+static int		urtwm_iq_calib_fw_supported(struct urtwm_softc *);
+static void		urtwm_iq_calib_fw(struct urtwm_softc *);
+#endif
 static void		urtwm_iq_calib(struct urtwm_softc *);
 static void		urtwm_lc_calib(struct urtwm_softc *);
 static void		urtwm_temp_calib(struct urtwm_softc *);
-#endif
 static int		urtwm_init(struct urtwm_softc *);
 static void		urtwm_stop(struct urtwm_softc *);
 static void		urtwm_abort_xfers(struct urtwm_softc *);
@@ -568,6 +570,7 @@ urtwm_attach(device_t self)
 	    MTX_NETWORK_LOCK, MTX_DEF);
 	URTWM_CMDQ_LOCK_INIT(sc);
 	URTWM_NT_LOCK_INIT(sc);
+	callout_init(&sc->sc_calib_to, 0);
 	callout_init(&sc->sc_pwrmode_init, 0);
 	mbufq_init(&sc->sc_snd, ifqmaxlen);
 
@@ -724,6 +727,8 @@ urtwm_detach(device_t self)
 	URTWM_LOCK(sc);
 	sc->sc_flags |= URTWM_DETACHED;
 	URTWM_UNLOCK(sc);
+
+	callout_drain(&sc->sc_calib_to);
 
 	urtwm_stop(sc);
 
@@ -1050,7 +1055,10 @@ urtwm_c2h_report(struct urtwm_softc *sc, uint8_t *buf, int len)
 		urtwm_ratectl_tx_complete(sc, &buf[2], len);
 		break;
 	case R12A_C2H_IQK_FINISHED:
-		/* TODO */
+		URTWM_DPRINTF(sc, URTWM_DEBUG_CALIB,
+		    "FW IQ calibration finished\n");
+		sc->sc_flags &= ~URTWM_IQK_RUNNING;
+		break;
 	default:
 		device_printf(sc->sc_dev,
 		    "%s: C2H report %d was not handled\n",
@@ -2431,6 +2439,7 @@ urtwm_parse_rom(struct urtwm_softc *sc, struct r12a_rom *rom)
 
 	sc->crystalcap = URTWM_GET_ROM_VAR(rom->crystalcap,
 	    R12A_ROM_CRYSTALCAP_DEF);
+	sc->thermal_meter = rom->thermal_meter;
 	sc->tx_bbswing_2g = URTWM_GET_ROM_VAR(rom->tx_bbswing_2g, 0);
 	sc->tx_bbswing_5g = URTWM_GET_ROM_VAR(rom->tx_bbswing_5g, 0);
 
@@ -3417,10 +3426,8 @@ urtwm_newstate(struct ieee80211vap *vap, enum ieee80211_state nstate, int arg)
 	IEEE80211_UNLOCK(ic);
 	URTWM_LOCK(sc);
 	if (ostate == IEEE80211_S_RUN) {
-#ifdef URTWM_TODO
 		/* Stop calibration. */
 		callout_stop(&sc->sc_calib_to);
-#endif
 
 		if (vap->iv_opmode == IEEE80211_M_IBSS) {
 			/* Stop periodical TSF synchronization. */
@@ -3560,13 +3567,12 @@ urtwm_newstate(struct ieee80211vap *vap, enum ieee80211_state nstate, int arg)
 		/* Turn link LED on. */
 		urtwm_set_led(sc, URTWM_LED_LINK, 1);
 
-#ifdef URTWM_TODO
 		/* Reset temperature calibration state machine. */
-		sc->sc_flags &= ~URTWN_TEMP_MEASURED;
-		sc->thcal_lctemp = 0;
+		sc->sc_flags &= ~URTWM_TEMP_MEASURED;
+		sc->thcal_temp = sc->thermal_meter;
+
 		/* Start periodic calibration. */
-		callout_reset(&sc->sc_calib_to, 2*hz, urtwn_calib_to, sc);
-#endif
+		callout_reset(&sc->sc_calib_to, 2*hz, urtwm_calib_to, sc);
 
 end_run:
 		ieee80211_free_node(ni);
@@ -3580,26 +3586,24 @@ end_run:
 	return (error != 0 ? error : uvp->newstate(vap, nstate, arg));
 }
 
-#ifdef URTWM_TODO
 static void
-urtwn_calib_to(void *arg)
+urtwm_calib_to(void *arg)
 {
-	struct urtwn_softc *sc = arg;
+	struct urtwm_softc *sc = arg;
 
 	/* Do it in a process context. */
-	urtwn_cmd_sleepable(sc, NULL, 0, urtwn_calib_cb);
+	urtwm_cmd_sleepable(sc, NULL, 0, urtwm_calib_cb);
 }
 
 static void
-urtwn_calib_cb(struct urtwn_softc *sc, union sec_param *data)
+urtwm_calib_cb(struct urtwm_softc *sc, union sec_param *data)
 {
 	/* Do temperature compensation. */
-	urtwn_temp_calib(sc);
+	urtwm_temp_calib(sc);
 
-	if ((urtwn_read_1(sc, R92C_MSR) & R92C_MSR_MASK) != R92C_MSR_NOLINK)
-		callout_reset(&sc->sc_calib_to, 2*hz, urtwn_calib_to, sc);
+	if ((urtwm_read_1(sc, R92C_MSR) & R92C_MSR_MASK) != R92C_MSR_NOLINK)
+		callout_reset(&sc->sc_calib_to, 2*hz, urtwm_calib_to, sc);
 }
-#endif	/* URTWM_TODO */
 
 static int8_t
 urtwm_r12a_get_rssi_cck(struct urtwm_softc *sc, void *physt)
@@ -4865,6 +4869,8 @@ urtwm_load_firmware(struct urtwm_softc *sc)
 	hdr = (const struct r92c_fw_hdr *)ptr;
 	/* Check if there is a valid FW header and skip it. */
 	if ((le16toh(hdr->signature) >> 4) == sc->fwsig) {
+		sc->fwver = le16toh(hdr->version);
+
 		URTWM_DPRINTF(sc, URTWM_DEBUG_FIRMWARE,
 		    "FW V%d.%d %02d-%02d %02d:%02d\n",
 		    le16toh(hdr->version), le16toh(hdr->subversion),
@@ -6364,114 +6370,184 @@ urtwm_antsel_init(struct urtwm_softc *sc)
 	sc->sc_ant = MS(reg, R12A_FPGA0_RFIFACEOE0_ANT);
 }
 
-#ifdef URTWM_TODO
 static void
-urtwn_iq_calib(struct urtwn_softc *sc)
+urtwm_iq_calib_sw(struct urtwm_softc *sc)
 {
 	/* TODO */
+	URTWM_DPRINTF(sc, URTWM_DEBUG_CALIB, "%s: SW IQ calibration: TODO\n",
+	    __func__);
+}
+
+#ifndef URTWM_WITHOUT_UCODE
+static int
+urtwm_iq_calib_fw_supported(struct urtwm_softc *sc)
+{
+	if (!(sc->sc_flags & URTWM_FW_LOADED))
+		return (0);
+
+	if (URTWM_CHIP_IS_12A(sc) && sc->fwver == 0x19)
+		return (1);
+
+	if (URTWM_CHIP_IS_21A(sc) && sc->fwver == 0x16)
+		return (1);
+
+	return (0);
 }
 
 static void
-urtwn_lc_calib(struct urtwn_softc *sc)
+urtwm_iq_calib_fw(struct urtwm_softc *sc)
 {
-	uint32_t rf_ac[2];
+	struct ieee80211_channel *c = sc->sc_ic.ic_curchan;
+	struct r12a_fw_cmd_iq_calib cmd;
+
+	if (sc->sc_flags & URTWM_IQK_RUNNING)
+		return;
+
+	URTWM_DPRINTF(sc, URTWM_DEBUG_CALIB, "Starting IQ calibration (FW)\n");
+
+	cmd.chan = IEEE80211_CHAN2IEEE(c);
+
+	if (IEEE80211_IS_CHAN_5GHZ(c))
+		cmd.band_bw = URTWM_CMD_IQ_BAND_5GHZ;
+	else
+		cmd.band_bw = URTWM_CMD_IQ_BAND_2GHZ;
+
+	/* TODO: 80/160 MHz. */
+	if (IEEE80211_IS_CHAN_HT40(c))
+		cmd.band_bw |= URTWM_CMD_IQ_CHAN_WIDTH_40;
+	else
+		cmd.band_bw |= URTWM_CMD_IQ_CHAN_WIDTH_20;
+
+	cmd.ext_5g_pa_lna = URTWM_CMD_IQ_EXT_PA_5G(sc->ext_pa_5g);
+	cmd.ext_5g_pa_lna |= URTWM_CMD_IQ_EXT_LNA_5G(sc->ext_lna_5g);
+
+	if (urtwm_fw_cmd(sc, R12A_CMD_IQ_CALIBRATE, &cmd, sizeof(cmd)) != 0) {
+		URTWM_DPRINTF(sc, URTWM_DEBUG_CALIB,
+		    "error while sending IQ calibration command to FW!\n");
+		return;
+	}
+
+	sc->sc_flags |= URTWM_IQK_RUNNING;
+}
+#endif
+
+static void
+urtwm_iq_calib(struct urtwm_softc *sc)
+{
+#ifndef URTWM_WITHOUT_UCODE
+	if (urtwm_iq_calib_fw_supported(sc))
+		urtwm_iq_calib_fw(sc);
+	else
+#endif
+		urtwm_iq_calib_sw(sc);
+}
+
+static void
+urtwm_lc_calib(struct urtwm_softc *sc)
+{
+	uint32_t chnlbw;
 	uint8_t txmode;
-	int i;
 
-	txmode = urtwn_read_1(sc, R92C_OFDM1_LSTF + 3);
-	if ((txmode & 0x70) != 0) {
+	URTWM_DPRINTF(sc, URTWM_DEBUG_CALIB, "%s: LC calibration started\n",
+	    __func__);
+
+	txmode = urtwm_read_1(sc, R12A_SINGLETONE_CONT_TX + 2);
+
+	if ((txmode & 0x07) != 0) {
 		/* Disable all continuous Tx. */
-		urtwn_write_1(sc, R92C_OFDM1_LSTF + 3, txmode & ~0x70);
-
-		/* Set RF mode to standby mode. */
-		for (i = 0; i < sc->nrxchains; i++) {
-			rf_ac[i] = urtwn_rf_read(sc, i, R92C_RF_AC);
-			urtwn_rf_write(sc, i, R92C_RF_AC,
-			    RW(rf_ac[i], R92C_RF_AC_MODE,
-				R92C_RF_AC_MODE_STANDBY));
-		}
+		/*
+		 * Skipped because BB turns off continuous Tx until
+		 * next packet comes in.
+		 */
 	} else {
 		/* Block all Tx queues. */
-		urtwn_write_1(sc, R92C_TXPAUSE, R92C_TX_QUEUE_ALL);
+		urtwm_write_1(sc, R92C_TXPAUSE, R92C_TX_QUEUE_ALL);
 	}
+
+	/* Enter LCK mode. */
+	urtwm_rf_setbits(sc, 0, R12A_RF_LCK, 0, 0x4000);
+
 	/* Start calibration. */
-	urtwn_rf_write(sc, 0, R92C_RF_CHNLBW,
-	    urtwn_rf_read(sc, 0, R92C_RF_CHNLBW) | R92C_RF_CHNLBW_LCSTART);
+	chnlbw = urtwm_rf_read(sc, 0, R92C_RF_CHNLBW);
+	urtwm_rf_write(sc, 0, R92C_RF_CHNLBW, chnlbw | R92C_RF_CHNLBW_LCSTART);
 
 	/* Give calibration the time to complete. */
-	usb_pause_mtx(&sc->sc_mtx, hz / 10);		/* 100ms */
+	urtwm_delay(sc, 150000);	/* 150 ms */
+
+	/* Leave LCK mode. */
+	urtwm_rf_setbits(sc, 0, R12A_RF_LCK, 0x4000, 0);
 
 	/* Restore configuration. */
-	if ((txmode & 0x70) != 0) {
-		/* Restore Tx mode. */
-		urtwn_write_1(sc, R92C_OFDM1_LSTF + 3, txmode);
-		/* Restore RF mode. */
-		for (i = 0; i < sc->nrxchains; i++)
-			urtwn_rf_write(sc, i, R92C_RF_AC, rf_ac[i]);
+	if ((txmode & 0x07) != 0) {
+		/* Continuous Tx case. */
+		/*
+		 * Skipped because BB turns off continuous Tx until
+		 * next packet comes in.
+		 */
 	} else {
 		/* Unblock all Tx queues. */
-		urtwn_write_1(sc, R92C_TXPAUSE, 0x00);
+		urtwm_write_1(sc, R92C_TXPAUSE, 0);
 	}
+
+	/* Recover channel number. */
+	urtwm_rf_write(sc, 0, R92C_RF_CHNLBW, chnlbw);
+
+	URTWM_DPRINTF(sc, URTWM_DEBUG_CALIB, "%s: LC calibration finished\n",
+	    __func__);
 }
 
 static void
-urtwn_temp_calib(struct urtwn_softc *sc)
+urtwm_temp_calib(struct urtwm_softc *sc)
 {
 	uint8_t temp;
 
-	URTWN_ASSERT_LOCKED(sc);
+	URTWM_ASSERT_LOCKED(sc);
 
-	if (!(sc->sc_flags & URTWN_TEMP_MEASURED)) {
+	if (!(sc->sc_flags & URTWM_TEMP_MEASURED)) {
 		/* Start measuring temperature. */
-		URTWN_DPRINTF(sc, URTWN_DEBUG_TEMP,
+		URTWM_DPRINTF(sc, URTWM_DEBUG_TEMP,
 		    "%s: start measuring temperature\n", __func__);
-		if (sc->chip & URTWN_CHIP_88E) {
-			urtwn_rf_write(sc, 0, R88E_RF_T_METER,
-			    R88E_RF_T_METER_START);
-		} else {
-			urtwn_rf_write(sc, 0, R92C_RF_T_METER,
-			    R92C_RF_T_METER_START);
-		}
-		sc->sc_flags |= URTWN_TEMP_MEASURED;
+		urtwm_rf_write(sc, 0, R88E_RF_T_METER, R88E_RF_T_METER_START);
+		sc->sc_flags |= URTWM_TEMP_MEASURED;
 		return;
 	}
-	sc->sc_flags &= ~URTWN_TEMP_MEASURED;
+	sc->sc_flags &= ~URTWM_TEMP_MEASURED;
 
 	/* Read measured temperature. */
-	if (sc->chip & URTWN_CHIP_88E) {
-		temp = MS(urtwn_rf_read(sc, 0, R88E_RF_T_METER),
-		    R88E_RF_T_METER_VAL);
-	} else {
-		temp = MS(urtwn_rf_read(sc, 0, R92C_RF_T_METER),
-		    R92C_RF_T_METER_VAL);
-	}
+	temp = MS(urtwm_rf_read(sc, 0, R88E_RF_T_METER), R88E_RF_T_METER_VAL);
 	if (temp == 0) {	/* Read failed, skip. */
-		URTWN_DPRINTF(sc, URTWN_DEBUG_TEMP,
+		URTWM_DPRINTF(sc, URTWM_DEBUG_TEMP,
 		    "%s: temperature read failed, skipping\n", __func__);
 		return;
 	}
 
-	URTWN_DPRINTF(sc, URTWN_DEBUG_TEMP,
-	    "%s: temperature: previous %u, current %u\n",
-	    __func__, sc->thcal_lctemp, temp);
+	URTWM_DPRINTF(sc, URTWM_DEBUG_TEMP,
+	    "temperature: previous %u, current %u\n",
+	    sc->thcal_temp, temp);
 
 	/*
-	 * Redo LC calibration if temperature changed significantly since
+	 * Redo LC/IQ calibration if temperature changed significantly since
 	 * last calibration.
 	 */
-	if (sc->thcal_lctemp == 0) {
-		/* First LC calibration is performed in urtwm_init(). */
-		sc->thcal_lctemp = temp;
-	} else if (abs(temp - sc->thcal_lctemp) > 1) {
-		URTWN_DPRINTF(sc, URTWN_DEBUG_TEMP,
-		    "%s: LC calib triggered by temp: %u -> %u\n",
-		    __func__, sc->thcal_lctemp, temp);
-		urtwn_lc_calib(sc);
-		/* Record temperature of last LC calibration. */
-		sc->thcal_lctemp = temp;
+	if (sc->thcal_temp == 0xff) {
+		/* efuse value is absent; do LCK at initial status. */
+		if (!URTWM_CHIP_IS_21A(sc))
+			urtwm_lc_calib(sc);
+
+		sc->thcal_temp = temp;
+	} else if (abs(temp - sc->thcal_temp) > URTWM_CALIB_THRESHOLD) {
+		URTWM_DPRINTF(sc, URTWM_DEBUG_TEMP,
+		    "%s: LC/IQ calib triggered by temp: %u -> %u\n",
+		    __func__, sc->thcal_temp, temp);
+
+		if (!URTWM_CHIP_IS_21A(sc))
+			urtwm_lc_calib(sc);
+		urtwm_iq_calib(sc);
+
+		/* Record temperature of last calibration. */
+		sc->thcal_temp = temp;
 	}
 }
-#endif	/* URTWM_TODO */
 
 static int
 urtwm_init(struct urtwm_softc *sc)
@@ -6707,13 +6783,6 @@ urtwm_init(struct urtwm_softc *sc)
 	urtwm_write_1(sc, R12A_SDIO_CTRL, 0);
 	urtwm_write_1(sc, R92C_ACLK_MON, 0);
 
-#ifdef URTWM_TODO
-	/* Perform LO and IQ calibrations. */
-	urtwn_iq_calib(sc);
-	/* Perform LC calibration. */
-	urtwn_lc_calib(sc);
-#endif
-
 	urtwm_write_1(sc, R92C_USB_HRPWM, 0);
 
 	usbd_transfer_start(sc->sc_xfer[URTWM_BULK_RX]);
@@ -6751,9 +6820,9 @@ urtwm_stop(struct urtwm_softc *sc)
 	}
 
 	sc->sc_flags &= ~(URTWM_RUNNING | URTWM_FW_LOADED);
-#ifdef URTWM_TODO
-	sc->thcal_lctemp = 0;
-#endif
+	sc->sc_flags &= ~(URTWM_TEMP_MEASURED | URTWM_IQK_RUNNING);
+	sc->fwver = 0;
+	sc->thcal_temp = 0;
 
 	urtwm_abort_xfers(sc);
 	urtwm_drain_mbufq(sc);

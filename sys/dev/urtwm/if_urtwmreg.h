@@ -709,6 +709,7 @@
 #define R12A_HSSI_PARAM2		0x8b0
 #define R12A_ADC_BUF_CLK		0x8c4
 #define R12A_ANTSEL_SW			0x900
+#define R12A_SINGLETONE_CONT_TX		0x914
 #define R92C_CCK0_SYSTEM		0xa00
 #define R12A_CCK_RX_PATH		0xa04
 #define R12A_HSSI_PARAM1(chain)		(0xc00 + (chain) * 0x200)
@@ -924,6 +925,7 @@
 #define R92C_RF_RCK_OS		0x30
 #define R92C_RF_TXPA_G(i)	(0x31 + (i))
 #define R88E_RF_T_METER		0x42
+#define R12A_RF_LCK		0xb4
 
 /* Bits for R92C_RF_AC. */
 #define R92C_RF_AC_MODE_M	0x70000

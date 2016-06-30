@@ -25,6 +25,7 @@
 #define URTWM_TXBUFSZ	(sizeof(struct r12a_tx_desc) + IEEE80211_MAX_LEN)
 
 #define URTWM_TX_TIMEOUT	5000	/* ms */
+#define URTWM_CALIB_THRESHOLD	6
 
 #define URTWM_LED_LINK	0
 #define URTWM_LED_DATA	1
@@ -128,8 +129,6 @@ struct urtwm_softc {
 	device_t		sc_dev;
 	struct usb_device	*sc_udev;
 
-#define URTWM_USE_RATECTL(_sc)	!!((_sc)->sc_flags & URTWM_FW_LOADED)
-
 	uint32_t		sc_debug;
 	uint8_t			sc_iface_index;
 	uint8_t			sc_flags;
@@ -137,8 +136,10 @@ struct urtwm_softc {
 #define URTWM_DETACHED		0x02
 #define URTWM_RUNNING		0x04
 #define URTWM_FW_LOADED		0x08
-#define URTWM_RXCKSUM_EN	0x10
-#define URTWM_RXCKSUM6_EN	0x20
+#define URTWM_TEMP_MEASURED	0x10
+#define URTWM_IQK_RUNNING	0x20
+#define URTWM_RXCKSUM_EN	0x40
+#define URTWM_RXCKSUM6_EN	0x80
 
 	uint8_t			chip;
 #define URTWM_CHIP_12A		0x01
@@ -147,6 +148,7 @@ struct urtwm_softc {
 #define URTWM_CHIP_IS_12A(_sc)	!!((_sc)->chip & URTWM_CHIP_12A)
 #define URTWM_CHIP_IS_21A(_sc)	!((_sc)->chip & URTWM_CHIP_12A)
 
+#define URTWM_USE_RATECTL(_sc)	!!((_sc)->sc_flags & URTWM_FW_LOADED)
 #define URTWM_CHIP_HAS_BCNQ1(_sc)	URTWM_CHIP_IS_21A(_sc)
 
 	int			ext_pa_2g:1,
@@ -163,6 +165,7 @@ struct urtwm_softc {
 	uint8_t			board_type;
 	uint8_t			regulatory;
 	uint8_t			crystalcap;
+	uint8_t			thermal_meter;
 	uint8_t			rfe_type;
 	uint8_t			tx_bbswing_2g;
 	uint8_t			tx_bbswing_5g;
@@ -188,8 +191,10 @@ struct urtwm_softc {
 	int			ledlink;
 	int			sc_ant;
 	int8_t			last_rssi;
+	uint8_t			thcal_temp;
 
 	const char		*fwname;
+	uint16_t		fwver;
 	uint16_t		fwsig;
 	int			fwcur;
 
@@ -207,6 +212,8 @@ struct urtwm_softc {
 
 	struct ieee80211_node	*node_list[R12A_MACID_MAX + 1];
 	struct mtx		nt_mtx;
+
+	struct callout		sc_calib_to;
 
 	struct mtx		sc_mtx;
 
