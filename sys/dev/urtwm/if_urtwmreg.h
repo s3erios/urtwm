@@ -1299,6 +1299,8 @@ struct r92c_rx_stat {
 #define R88E_RXDW3_RPT_TX2	2
 
 	uint32_t	rxdw4;
+#define R92C_RXDW4_SGI		0x00000001
+
 	uint32_t	rxdw5;
 } __packed __attribute__((aligned(4)));
 
@@ -1448,7 +1450,7 @@ struct r12a_tx_desc {
 #define R12A_TXDW4_RTSRATE_S		24
 
 	uint32_t	txdw5;
-#define R12A_TXDW5_SHPRE	0x00000010
+#define R12A_TXDW5_SGI		0x00000010
 #define R12A_TXDW5_DATA_LDPC	0x00000080
 
 	uint32_t	txdw6;

@@ -311,6 +311,8 @@ static void		urtwm_tx_protection(struct urtwm_softc *,
 static void		urtwm_tx_raid(struct urtwm_softc *,
 			    struct r12a_tx_desc *, struct ieee80211_node *,
 			    int);
+static void		urtwm_tx_set_sgi(struct urtwm_softc *,
+			    struct r12a_tx_desc *, struct ieee80211_node *);
 static int		urtwm_tx_data(struct urtwm_softc *,
 			    struct ieee80211_node *, struct mbuf *,
 			    struct urtwm_data *);
@@ -633,16 +635,19 @@ urtwm_attach(device_t self)
 	    IEEE80211_CRYPTO_TKIP |
 	    IEEE80211_CRYPTO_AES_CCM;
 
-	ic->ic_htcaps = IEEE80211_HTC_HT |
-	    IEEE80211_HTC_AMPDU |
-	    IEEE80211_HTC_AMSDU |
-	    IEEE80211_HTCAP_MAXAMSDU_3839 |
-	    IEEE80211_HTCAP_SMPS_OFF
-	    ;
-	/* no HT40 just yet */
-#ifdef URTWM_TODO
-	ic->ic_htcaps |= IEEE80211_HTCAP_CHWIDTH40;
+	ic->ic_htcaps =
+	      IEEE80211_HTCAP_SHORTGI20		/* short GI in 20MHz */
+#ifdef URTWM_TODO	/* no HT40 just yet */
+	    | IEEE80211_HTCAP_CHWIDTH40		/* 40 MHz channel width */
+	    | IEEE80211_HTCAP_SHORTGI40		/* short GI in 40MHz */
 #endif
+	    | IEEE80211_HTCAP_MAXAMSDU_3839	/* max A-MSDU length */
+	    | IEEE80211_HTCAP_SMPS_OFF		/* SM PS mode disabled */
+	    /* s/w capabilities */
+	    | IEEE80211_HTC_HT			/* HT operation */
+	    | IEEE80211_HTC_AMPDU		/* A-MPDU tx */
+	    | IEEE80211_HTC_AMSDU		/* A-MSDU tx */
+	    ;
 
 	ic->ic_txstream = sc->ntxchains;
 	ic->ic_rxstream = sc->nrxchains;
@@ -1194,6 +1199,8 @@ urtwm_rx_frame(struct urtwm_softc *sc, struct mbuf *m, int8_t *rssi)
 		struct urtwm_rx_radiotap_header *tap = &sc->sc_rxtap;
 
 		tap->wr_flags = 0;
+		if (le32toh(stat->rxdw4) & R92C_RXDW4_SGI)
+			tap->wr_flags |= IEEE80211_RADIOTAP_F_SHORTGI;
 
 		/* XXX TODO: multi-vap */
 		tap->wr_tsft = urtwm_get_tsf_high(sc, 0);
@@ -1203,7 +1210,6 @@ urtwm_rx_frame(struct urtwm_softc *sc, struct mbuf *m, int8_t *rssi)
 		tap->wr_tsft += stat->rxdw5;
 
 		/* XXX 20/40? */
-		/* XXX shortgi? */
 
 		/* Map HW rate index to 802.11 rate. */
 		if (rate < URTWM_RIDX_MCS(0))
@@ -2697,6 +2703,9 @@ urtwm_ioctl_reset(struct ieee80211vap *vap, u_long cmd)
 		break;
 	}
 #endif
+	case IEEE80211_IOC_SHORTGI:
+		error = 0;
+		break;
 	default:
 		error = ENETRESET;
 		break;
@@ -3812,6 +3821,22 @@ urtwm_tx_raid(struct urtwm_softc *sc, struct r12a_tx_desc *txd,
 	txd->txdw1 |= htole32(SM(R12A_TXDW1_RAID, raid));
 }
 
+static void
+urtwm_tx_set_sgi(struct urtwm_softc *sc, struct r12a_tx_desc *txd,
+    struct ieee80211_node *ni)
+{
+	struct ieee80211vap *vap = ni->ni_vap;
+
+	if ((vap->iv_flags_ht & IEEE80211_FHT_SHORTGI20) &&	/* HT20 */
+	    (ni->ni_htcap & IEEE80211_HTCAP_SHORTGI20))
+		txd->txdw5 |= htole32(R12A_TXDW5_SGI);
+	else if (ni->ni_chan != IEEE80211_CHAN_ANYC &&		/* HT40 */
+	    IEEE80211_IS_CHAN_HT40(ni->ni_chan) &&
+	    (ni->ni_htcap & IEEE80211_HTCAP_SHORTGI40) &&
+	    (vap->iv_flags_ht & IEEE80211_FHT_SHORTGI40))
+		txd->txdw5 |= htole32(R12A_TXDW5_SGI);
+}
+
 static int
 urtwm_tx_data(struct urtwm_softc *sc, struct ieee80211_node *ni,
     struct mbuf *m, struct urtwm_data *data)
@@ -3921,8 +3946,8 @@ urtwm_tx_data(struct urtwm_softc *sc, struct ieee80211_node *ni,
 			if (sc->sc_flags & URTWM_FW_LOADED)
 				sc->sc_tx_n_active++;
 
-			if (ic->ic_flags & IEEE80211_F_SHPREAMBLE)
-				txd->txdw5 |= htole32(R12A_TXDW5_SHPRE);
+			if (ridx >= URTWM_RIDX_MCS(0))
+				urtwm_tx_set_sgi(sc, txd, ni);
 
 			if (rate & IEEE80211_RATE_MCS) {
 				urtwm_tx_protection(sc, txd,
@@ -3943,7 +3968,7 @@ urtwm_tx_data(struct urtwm_softc *sc, struct ieee80211_node *ni,
 	txd->txdw1 |= htole32(SM(R12A_TXDW1_QSEL, qsel));
 
 	/* XXX TODO: 40MHZ flag? */
-	/* XXX Short-GI? */
+	/* XXX Short preamble? */
 
 	txd->txdw1 |= htole32(SM(R12A_TXDW1_MACID, macid));
 	txd->txdw4 |= htole32(SM(R12A_TXDW4_DATARATE, ridx));
@@ -4067,8 +4092,6 @@ urtwm_tx_raw(struct urtwm_softc *sc, struct ieee80211_node *ni,
 		txd->txdw4 |= htole32(SM(R12A_TXDW4_RETRY_LMT,
 		    params->ibp_try0));
 	}
-	if (params->ibp_flags & IEEE80211_BPF_SHORTPRE)
-		txd->txdw5 |= htole32(R12A_TXDW5_SHPRE);
 	if (params->ibp_flags & IEEE80211_BPF_RTS)
 		urtwm_tx_protection(sc, txd, IEEE80211_PROT_RTSCTS);
 	if (params->ibp_flags & IEEE80211_BPF_CTS)
