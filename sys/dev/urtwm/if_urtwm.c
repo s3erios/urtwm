@@ -3744,19 +3744,16 @@ urtwm_tx_raid(struct urtwm_softc *sc, struct r12a_tx_desc *txd,
     struct ieee80211_node *ni, int ismcast)
 {
 	struct ieee80211com *ic = &sc->sc_ic;
-	struct ieee80211_channel *c = ic->ic_curchan;
+	struct ieee80211vap *vap = ni->ni_vap;
+	struct ieee80211_channel *chan;
 	enum ieee80211_phymode mode;
 	uint8_t raid;
 
-	mode = ic->ic_curmode;
-	if (mode == IEEE80211_MODE_AUTO)
-		mode = ieee80211_chan2mode(c);
+	chan = (ni->ni_chan != IEEE80211_CHAN_ANYC) ?
+		ni->ni_chan : ic->ic_curchan;
+	mode = ieee80211_chan2mode(chan);
 
 	/* NB: group addressed frames are done at 11bg rates for now */
-	/*
-	 * XXX TODO: this should be per-node, for 11b versus 11bg
-	 * nodes in hostap mode
-	 */
 	if (ismcast || !(ni->ni_flags & IEEE80211_NODE_HT)) {
 		switch (mode) {
 		case IEEE80211_MODE_11A:
@@ -3784,7 +3781,10 @@ urtwm_tx_raid(struct urtwm_softc *sc, struct r12a_tx_desc *txd,
 		raid = R12A_RAID_11B;
 		break;
 	case IEEE80211_MODE_11G:
-		raid = R12A_RAID_11BG;
+		if (vap->iv_flags & IEEE80211_F_PUREG)
+			raid = R12A_RAID_11G;
+		else
+			raid = R12A_RAID_11BG;
 		break;
 	case IEEE80211_MODE_11NA:
 		if (sc->ntxchains == 1)
@@ -3794,12 +3794,12 @@ urtwm_tx_raid(struct urtwm_softc *sc, struct r12a_tx_desc *txd,
 		break;
 	case IEEE80211_MODE_11NG:
 		if (sc->ntxchains == 1) {
-			if (IEEE80211_IS_CHAN_HT40(c))
+			if (IEEE80211_IS_CHAN_HT40(chan))
 				raid = R12A_RAID_11BGN_1_40;
 			else
 				raid = R12A_RAID_11BGN_1;
 		} else {
-			if (IEEE80211_IS_CHAN_HT40(c))
+			if (IEEE80211_IS_CHAN_HT40(chan))
 				raid = R12A_RAID_11BGN_2_40;
 			else
 				raid = R12A_RAID_11BGN_2;
