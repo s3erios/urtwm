@@ -955,7 +955,7 @@ urtwm_rx_copy_to_mbuf(struct urtwm_softc *sc, struct r92c_rx_stat *stat,
 		return (NULL);
 
 	rxdw0 = le32toh(stat->rxdw0);
-	if (rxdw0 & (R92C_RXDW0_CRCERR | R92C_RXDW0_ICVERR)) {
+	if (__predict_false(rxdw0 & (R92C_RXDW0_CRCERR | R92C_RXDW0_ICVERR))) {
 		/*
 		 * This should not happen since we setup our Rx filter
 		 * to not receive these frames.
@@ -967,7 +967,7 @@ urtwm_rx_copy_to_mbuf(struct urtwm_softc *sc, struct r92c_rx_stat *stat,
 	}
 
 	pktlen = MS(rxdw0, R92C_RXDW0_PKTLEN);
-	if (pktlen < sizeof(struct ieee80211_frame_ack)) {
+	if (__predict_false(pktlen < sizeof(struct ieee80211_frame_ack))) {
 		/*
 		 * Should not happen (because of Rx filter setup).
 		 */
@@ -1027,7 +1027,7 @@ urtwm_report_intr(struct urtwm_softc *sc, struct usb_xfer *xfer,
 
 	usbd_xfer_status(xfer, &len, NULL, NULL, NULL);
 
-	if (len < sizeof(*stat)) {
+	if (__predict_false(len < sizeof(*stat))) {
 		counter_u64_add(ic->ic_ierrors, 1);
 		return (NULL);
 	}
@@ -1139,7 +1139,7 @@ urtwm_rxeof(struct urtwm_softc *sc, uint8_t *buf, int len)
 		rxdw0 = le32toh(stat->rxdw0);
 
 		pktlen = MS(rxdw0, R92C_RXDW0_PKTLEN);
-		if (pktlen == 0)
+		if (__predict_false(pktlen == 0))
 			break;
 
 		infosz = MS(rxdw0, R92C_RXDW0_INFOSZ) * 8;
@@ -1187,13 +1187,29 @@ urtwm_rx_frame(struct urtwm_softc *sc, struct mbuf *m, int8_t *rssi)
 	cipher = MS(rxdw0, R92C_RXDW0_CIPHER);
 	infosz = MS(rxdw0, R92C_RXDW0_INFOSZ) * 8;
 
+	wh = (struct ieee80211_frame_min *)(mtod(m, uint8_t *) +
+	    sizeof(*stat) + infosz);
+	if ((wh->i_fc[1] & IEEE80211_FC1_PROTECTED) &&
+	    cipher != R92C_CAM_ALGO_NONE)
+		m->m_flags |= M_WEP;
+
+	if (m->m_len >= sizeof(*wh))
+		ni = ieee80211_find_rxnode(ic, wh);
+	else
+		ni = NULL;
+	un = URTWM_NODE(ni);
+
 	/* Get RSSI from PHY status descriptor if present. */
 	if (infosz != 0 && (rxdw0 & R92C_RXDW0_PHYST)) {
 		*rssi = urtwm_get_rssi(sc, rate, &stat[1]);
 		URTWM_DPRINTF(sc, URTWM_DEBUG_RSSI, "%s: rssi=%d\n", __func__,
 		    *rssi);
+
+		sc->last_rssi = *rssi;
+		if (un != NULL)
+			un->last_rssi = *rssi;
 	} else
-		*rssi = -127;
+		*rssi = (un != NULL) ? un->last_rssi : sc->last_rssi;
 
 	if (ieee80211_radiotap_active(ic)) {
 		struct urtwm_rx_radiotap_header *tap = &sc->sc_rxtap;
@@ -1223,29 +1239,6 @@ urtwm_rx_frame(struct urtwm_softc *sc, struct mbuf *m, int8_t *rssi)
 
 	/* Drop descriptor. */
 	m_adj(m, sizeof(*stat) + infosz);
-	wh = mtod(m, struct ieee80211_frame_min *);
-
-	if ((wh->i_fc[1] & IEEE80211_FC1_PROTECTED) &&
-	    cipher != R92C_CAM_ALGO_NONE) {
-		m->m_flags |= M_WEP;
-	}
-
-	if (m->m_len >= sizeof(*wh))
-		ni = ieee80211_find_rxnode(ic, wh);
-	else
-		ni = NULL;
-
-	un = URTWM_NODE(ni);
-	if (*rssi != -127) {
-		sc->last_rssi = *rssi;
-		if (un != NULL)
-			un->last_rssi = *rssi;
-	} else {
-		*rssi = (un != NULL) ? un->last_rssi : sc->last_rssi;
-
-		if (ieee80211_radiotap_active(ic))
-			sc->sc_rxtap.wr_dbm_antsignal = *rssi;
-	}
 
 	return (ni);
 }
