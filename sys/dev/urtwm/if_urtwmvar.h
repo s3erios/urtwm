@@ -131,15 +131,16 @@ struct urtwm_softc {
 
 	uint32_t		sc_debug;
 	uint8_t			sc_iface_index;
-	uint8_t			sc_flags;
-#define URTWM_FLAG_CCK_HIPWR	0x01
-#define URTWM_DETACHED		0x02
-#define URTWM_RUNNING		0x04
-#define URTWM_FW_LOADED		0x08
-#define URTWM_TEMP_MEASURED	0x10
-#define URTWM_IQK_RUNNING	0x20
-#define URTWM_RXCKSUM_EN	0x40
-#define URTWM_RXCKSUM6_EN	0x80
+	uint16_t		sc_flags;
+#define URTWM_FLAG_CCK_HIPWR	0x0001
+#define URTWM_DETACHED		0x0002
+#define URTWM_STARTED		0x0004
+#define URTWM_RUNNING		0x0008
+#define URTWM_FW_LOADED		0x0010
+#define URTWM_TEMP_MEASURED	0x0020
+#define URTWM_IQK_RUNNING	0x0040
+#define URTWM_RXCKSUM_EN	0x0080
+#define URTWM_RXCKSUM6_EN	0x0100
 
 	uint8_t			chip;
 #define URTWM_CHIP_12A		0x01

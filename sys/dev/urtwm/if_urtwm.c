@@ -6583,6 +6583,7 @@ urtwm_init(struct urtwm_softc *sc)
 		URTWM_UNLOCK(sc);
 		return (0);
 	}
+	sc->sc_flags |= URTWM_STARTED;
 
 	/* Allocate Tx/Rx buffers. */
 	error = urtwm_alloc_rx_list(sc);
@@ -6834,12 +6835,12 @@ urtwm_stop(struct urtwm_softc *sc)
 {
 
 	URTWM_LOCK(sc);
-	if (!(sc->sc_flags & URTWM_RUNNING)) {
+	if (!(sc->sc_flags & URTWM_STARTED)) {
 		URTWM_UNLOCK(sc);
 		return;
 	}
 
-	sc->sc_flags &= ~(URTWM_RUNNING | URTWM_FW_LOADED);
+	sc->sc_flags &= ~(URTWM_STARTED | URTWM_RUNNING | URTWM_FW_LOADED);
 	sc->sc_flags &= ~(URTWM_TEMP_MEASURED | URTWM_IQK_RUNNING);
 	sc->fwver = 0;
 	sc->thcal_temp = 0;
