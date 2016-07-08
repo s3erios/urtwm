@@ -4017,6 +4017,8 @@ urtwm_tx_data(struct urtwm_softc *sc, struct ieee80211_node *ni,
 		tap->wt_flags = 0;
 		if (k != NULL)
 			tap->wt_flags |= IEEE80211_RADIOTAP_F_WEP;
+		if (txd->txdw5 & htole32(R12A_TXDW5_SGI))
+			tap->wt_flags |= IEEE80211_RADIOTAP_F_SHORTGI;
 		ieee80211_radiotap_tx(vap, m);
 	}
 
@@ -4116,6 +4118,8 @@ urtwm_tx_raw(struct urtwm_softc *sc, struct ieee80211_node *ni,
 		tap->wt_flags = 0;
 		if (k != NULL)
 			tap->wt_flags |= IEEE80211_RADIOTAP_F_WEP;
+		if (txd->txdw5 & htole32(R12A_TXDW5_SGI))
+			tap->wt_flags |= IEEE80211_RADIOTAP_F_SHORTGI;
 		ieee80211_radiotap_tx(vap, m);
 	}
 
