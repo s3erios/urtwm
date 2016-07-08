@@ -953,7 +953,7 @@
 /*
  * CAM entries.
  */
-#define R92C_CAM_ENTRY_COUNT	32
+#define R12A_CAM_ENTRY_COUNT	64
 
 #define R92C_CAM_CTL0(entry)	((entry) * 8 + 0)
 #define R92C_CAM_CTL1(entry)	((entry) * 8 + 1)
@@ -1110,7 +1110,7 @@ struct r92c_fw_cmd_macid_cfg {
 #endif
 #define URTWM_MACID_BC		1	/* Broadcast. */
 #define URTWM_MACID_BSS		0
-#define R12A_MACID_MAX		63
+#define R12A_MACID_MAX		127
 #define URTWM_MACID_MAX(sc)	R12A_MACID_MAX
 #define URTWM_MACID_UNDEFINED	(uint8_t)-1
 #define URTWM_MACID_VALID	0x80

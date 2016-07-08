@@ -3080,7 +3080,7 @@ urtwm_key_alloc(struct ieee80211vap *vap, struct ieee80211_key *k,
 			 * XXX incompatible with IBSS RSN.
 			 */
 			for (i = IEEE80211_WEP_NKID;
-			     i < R92C_CAM_ENTRY_COUNT; i++) {
+			     i < R12A_CAM_ENTRY_COUNT; i++) {
 				if ((sc->keys_bmap & (1 << i)) == 0) {
 					sc->keys_bmap |= 1 << i;
 					*keyix = i;
@@ -3088,7 +3088,7 @@ urtwm_key_alloc(struct ieee80211vap *vap, struct ieee80211_key *k,
 				}
 			}
 			URTWM_UNLOCK(sc);
-			if (i == R92C_CAM_ENTRY_COUNT) {
+			if (i == R12A_CAM_ENTRY_COUNT) {
 				device_printf(sc->sc_dev,
 				    "%s: no free space in the key table\n",
 				    __func__);
