@@ -2972,8 +2972,8 @@ urtwm_push_nulldata(struct urtwm_softc *sc, struct ieee80211vap *vap)
 
 	/* Re-enable beacon detection. */
 	urtwm_setbits_1_shift(sc, R92C_FWHW_TXQ_CTRL,
-	    R92C_FWHW_TXQ_CTRL_REAL_BEACON, 0, 2);
-	urtwm_setbits_1_shift(sc, R92C_CR, 0, R92C_CR_ENSWBCN, 1);
+	    0, R92C_FWHW_TXQ_CTRL_REAL_BEACON, 2);
+	urtwm_setbits_1_shift(sc, R92C_CR, R92C_CR_ENSWBCN, 0, 1);
 
 	/* Setup power management. */
 	/*
