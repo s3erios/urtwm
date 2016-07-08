@@ -5366,7 +5366,7 @@ urtwm_r12a_set_band_5ghz(struct urtwm_softc *sc)
 {
 	int ntries;
 
-	urtwm_write_1(sc, R12A_CCK_CHECK, 0x80);
+	urtwm_write_1(sc, R12A_CCK_CHECK, R12A_CCK_CHECK_5GHZ);
 
 	for (ntries = 0; ntries < 100; ntries++) {
 		if ((urtwm_read_2(sc, R12A_TXPKT_EMPTY) & 0x30) == 0x30)
@@ -5452,7 +5452,7 @@ urtwm_r21a_set_band_5ghz(struct urtwm_softc *sc)
 		urtwm_r21a_bypass_ext_lna_2ghz(sc);
 	}
 
-	urtwm_write_1(sc, R12A_CCK_CHECK, 0x80);
+	urtwm_write_1(sc, R12A_CCK_CHECK, R12A_CCK_CHECK_5GHZ);
 
 	for (ntries = 0; ntries < 100; ntries++) {
 		if ((urtwm_read_2(sc, R12A_TXPKT_EMPTY) & 0x30) == 0x30)
