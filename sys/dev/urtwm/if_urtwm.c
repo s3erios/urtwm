@@ -152,6 +152,9 @@ static void		urtwm_sysctlattach(struct urtwm_softc *);
 static void		urtwm_drain_mbufq(struct urtwm_softc *);
 static usb_error_t	urtwm_do_request(struct urtwm_softc *,
 			    struct usb_device_request *, void *);
+static void		urtwm_vap_decrement_counters(struct urtwm_softc *,
+			    enum ieee80211_opmode, int);
+static void		urtwm_set_ic_opmode(struct urtwm_softc *);
 static struct ieee80211vap *urtwm_vap_create(struct ieee80211com *,
 		    const char [IFNAMSIZ], int, enum ieee80211_opmode, int,
                     const uint8_t [IEEE80211_ADDR_LEN],
@@ -185,6 +188,10 @@ static void		urtwm_free_list(struct urtwm_softc *,
 			    struct urtwm_data data[], int);
 static void		urtwm_free_rx_list(struct urtwm_softc *);
 static void		urtwm_free_tx_list(struct urtwm_softc *);
+static void		urtwm_r12a_transfer_submit(struct urtwm_softc *,
+			    struct usb_xfer *, struct urtwm_data *);
+static void		urtwm_r21a_transfer_submit(struct urtwm_softc *,
+			    struct usb_xfer *, struct urtwm_data *);
 static struct urtwm_data *	_urtwm_getbuf(struct urtwm_softc *);
 static struct urtwm_data *	urtwm_getbuf(struct urtwm_softc *);
 static usb_error_t	urtwm_write_region_1(struct urtwm_softc *, uint16_t,
@@ -249,12 +256,21 @@ static void		urtwm_parse_rom(struct urtwm_softc *,
 static int		urtwm_ra_init(struct urtwm_softc *);
 #endif
 static int		urtwm_ioctl_reset(struct ieee80211vap *, u_long);
+static void		urtwm_reset_beacon_valid(struct urtwm_softc *, int);
+static int		urtwm_check_beacon_valid(struct urtwm_softc *, int);
+static void		urtwm_select_beacon(struct urtwm_softc *, int);
 static void		urtwm_init_beacon(struct urtwm_softc *,
 			    struct urtwm_vap *);
 static int		urtwm_setup_beacon(struct urtwm_softc *,
 			    struct ieee80211_node *);
 static void		urtwm_update_beacon(struct ieee80211vap *, int);
-static int		urtwm_tx_beacon(struct urtwm_softc *sc,
+#ifndef URTWM_WITHOUT_UCODE
+static int		urtwm_tx_fwpkt_check(struct urtwm_softc *,
+			    struct ieee80211vap *);
+#endif
+static int		urtwm_tx_beacon_check(struct urtwm_softc *,
+			    struct urtwm_vap *);
+static int		urtwm_tx_beacon(struct urtwm_softc *,
 			    struct urtwm_vap *);
 #ifndef URTWM_WITHOUT_UCODE
 static int		urtwm_construct_nulldata(struct urtwm_softc *,
@@ -297,6 +313,8 @@ static void		urtwm_set_mode(struct urtwm_softc *, uint8_t, int);
 static void		urtwm_adhoc_recv_mgmt(struct ieee80211_node *,
 			    struct mbuf *, int,
 			    const struct ieee80211_rx_stats *, int, int);
+static int		urtwm_monitor_newstate(struct ieee80211vap *,
+			    enum ieee80211_state, int);
 static int		urtwm_newstate(struct ieee80211vap *,
 			    enum ieee80211_state, int);
 static void		urtwm_calib_to(void *);
@@ -361,6 +379,8 @@ static void		urtwm_set_band(struct urtwm_softc *,
 static void		urtwm_cam_init(struct urtwm_softc *);
 static int		urtwm_cam_write(struct urtwm_softc *, uint32_t,
 			    uint32_t);
+static void		urtwm_rxfilter_update_mgt(struct urtwm_softc *);
+static void		urtwm_rxfilter_update(struct urtwm_softc *);
 static void		urtwm_rxfilter_init(struct urtwm_softc *);
 static void		urtwm_edca_init(struct urtwm_softc *);
 static void		urtwm_mrr_init(struct urtwm_softc *);
@@ -391,6 +411,10 @@ static void		urtwm_set_multi(struct urtwm_softc *);
 static void		urtwm_set_promisc(struct urtwm_softc *);
 static void		urtwm_update_promisc(struct ieee80211com *);
 static void		urtwm_update_mcast(struct ieee80211com *);
+static int		urtwm_set_bssid(struct urtwm_softc *,
+			    const uint8_t *, int);
+static int		urtwm_set_macaddr(struct urtwm_softc *,
+			    const uint8_t *, int);
 static struct ieee80211_node *urtwm_node_alloc(struct ieee80211vap *,
 			    const uint8_t mac[IEEE80211_ADDR_LEN]);
 static void		urtwm_newassoc(struct ieee80211_node *, int);
@@ -420,6 +444,8 @@ static void		urtwm_delay(struct urtwm_softc *, int);
 #define urtwm_bb_read		urtwm_read_4
 #define urtwm_bb_setbits	urtwm_setbits_4
 
+#define urtwm_transfer_submit(_sc, _xfer, _data) \
+	(((_sc)->sc_transfer_submit)((_sc), (_xfer), (_data)))
 #define urtwm_rf_read(_sc, _chain, _addr) \
 	(((_sc)->sc_rf_read)((_sc), (_chain), (_addr)))
 #define urtwm_check_condition(_sc, _cond) \
@@ -558,6 +584,7 @@ urtwm_attach(device_t self)
 	sc->sc_flags = URTWM_RXCKSUM_EN | URTWM_RXCKSUM6_EN;
 	sc->sc_udev = uaa->device;
 	sc->sc_dev = self;
+	sc->cur_bcnq_id = URTWM_VAP_ID_INVALID;
 	if (USB_GET_DRIVER_INFO(uaa) == URTWM_RTL8812A)
 		sc->chip |= URTWM_CHIP_12A;
 
@@ -790,6 +817,74 @@ urtwm_do_request(struct urtwm_softc *sc, struct usb_device_request *req,
 	return (err);
 }
 
+static void
+urtwm_vap_decrement_counters(struct urtwm_softc *sc,
+    enum ieee80211_opmode opmode, int id)
+{
+
+	URTWM_ASSERT_LOCKED(sc);
+
+	if (id != URTWM_VAP_ID_INVALID) {
+		KASSERT(id == 0 || id == 1, ("wrong vap id %d!\n", id));
+		KASSERT(sc->vaps[id] != NULL, ("vap pointer is NULL\n"));
+		sc->vaps[id] = NULL;
+	}
+
+	switch (opmode) {
+	case IEEE80211_M_HOSTAP:
+		sc->ap_vaps--;
+		/* FALLTHROUGH */
+	case IEEE80211_M_IBSS:
+		sc->bcn_vaps--;
+		/* FALLTHROUGH */
+	case IEEE80211_M_STA:
+		sc->nvaps--;
+		break;
+	case IEEE80211_M_MONITOR:
+		sc->mon_vaps--;
+		break;
+	default:
+		KASSERT(1, ("wrong opmode %d\n", opmode));
+		break;
+	}
+
+	KASSERT(sc->vaps_running >= 0 && sc->monvaps_running >= 0,
+	    ("number of running vaps is negative (vaps %d, monvaps %d)\n",
+	    sc->vaps_running, sc->monvaps_running));
+	KASSERT(sc->vaps_running - sc->monvaps_running <= 2,
+	    ("number of running vaps is too big (vaps %d, monvaps %d)\n",
+	    sc->vaps_running, sc->monvaps_running));
+
+	KASSERT(sc->nvaps >= 0 && sc->nvaps <= 2,
+	    ("wrong value %d for nvaps\n", sc->nvaps));
+	KASSERT(sc->mon_vaps >= 0, ("mon_vaps is negative (%d)\n",
+	    sc->mon_vaps));
+	KASSERT(sc->bcn_vaps >= 0 && ((URTWM_CHIP_HAS_BCNQ1(sc) &&
+	    sc->bcn_vaps <= 2) || sc->bcn_vaps <= 1),
+	    ("bcn_vaps value %d is wrong\n", sc->bcn_vaps));
+	KASSERT(sc->ap_vaps >= 0 && ((URTWM_CHIP_HAS_BCNQ1(sc) &&
+	    sc->ap_vaps <= 2) || sc->ap_vaps <= 1),
+	    ("ap_vaps value %d is wrong\n", sc->ap_vaps));
+}
+
+static void
+urtwm_set_ic_opmode(struct urtwm_softc *sc)
+{
+	struct ieee80211com *ic = &sc->sc_ic;
+
+	URTWM_ASSERT_LOCKED(sc);
+
+	/* for ieee80211_reset_erp() */
+	if (sc->bcn_vaps - sc->ap_vaps > 0)
+		ic->ic_opmode = IEEE80211_M_IBSS;
+	else if (sc->ap_vaps > 0)
+		ic->ic_opmode = IEEE80211_M_HOSTAP;
+	else if (sc->nvaps > 0)
+		ic->ic_opmode = IEEE80211_M_STA;
+	else
+		ic->ic_opmode = IEEE80211_M_MONITOR;
+}
+
 static struct ieee80211vap *
 urtwm_vap_create(struct ieee80211com *ic, const char name[IFNAMSIZ], int unit,
     enum ieee80211_opmode opmode, int flags,
@@ -800,11 +895,67 @@ urtwm_vap_create(struct ieee80211com *ic, const char name[IFNAMSIZ], int unit,
 	struct urtwm_vap *uvp;
 	struct ieee80211vap *vap;
 	struct ifnet *ifp;
+	int id = URTWM_VAP_ID_INVALID;
 
-	if (!TAILQ_EMPTY(&ic->ic_vaps))		/* only one at a time */
-		return (NULL);
+	URTWM_LOCK(sc);
+	KASSERT(sc->nvaps <= 2, ("nvaps overflow (%d > 2)\n", sc->nvaps));
+	KASSERT(sc->ap_vaps <= 2, ("ap_vaps overflow (%d > 2)\n",
+	    sc->ap_vaps));
+	KASSERT(sc->bcn_vaps <= 2, ("bcn_vaps overflow (%d > 2)\n",
+	    sc->bcn_vaps));
+
+	if (opmode != IEEE80211_M_MONITOR) {
+		switch (sc->nvaps) {
+		case 0:
+			id = 0;
+			break;
+		case 1:
+			if (sc->vaps[1] == NULL)
+				id = 1;
+			else if (sc->vaps[0] == NULL)
+				id = 0;
+			KASSERT(id != URTWM_VAP_ID_INVALID,
+			    ("no free ports left\n"));
+			break;
+		case 2:
+		default:
+			goto fail;
+		}
+
+		if (opmode == IEEE80211_M_IBSS ||
+		    opmode == IEEE80211_M_HOSTAP) {
+			if ((sc->bcn_vaps == 1 && !URTWM_CHIP_HAS_BCNQ1(sc)) ||
+			    sc->bcn_vaps == 2)
+				goto fail;
+		}
+	}
+
+	switch (opmode) {
+	case IEEE80211_M_HOSTAP:
+		sc->ap_vaps++;
+		/* FALLTHROUGH */
+	case IEEE80211_M_IBSS:
+		sc->bcn_vaps++;
+		/* FALLTHROUGH */
+	case IEEE80211_M_STA:
+		sc->nvaps++;
+		break;
+	case IEEE80211_M_MONITOR:
+		sc->mon_vaps++;
+		break;
+	default:
+		KASSERT(1, ("unknown opmode %d\n", opmode));
+		goto fail;
+	}
+	URTWM_UNLOCK(sc);
 
 	uvp = malloc(sizeof(struct urtwm_vap), M_80211_VAP, M_WAITOK | M_ZERO);
+	uvp->id = id;
+	if (id != URTWM_VAP_ID_INVALID) {
+		URTWM_LOCK(sc);
+		sc->vaps[id] = uvp;
+		URTWM_UNLOCK(sc);
+	}
 	vap = &uvp->vap;
 	/* enable s/w bmiss handling for sta mode */
 
@@ -812,6 +963,11 @@ urtwm_vap_create(struct ieee80211com *ic, const char name[IFNAMSIZ], int unit,
 	    flags | IEEE80211_CLONE_NOBEACONS, bssid) != 0) {
 		/* out of memory */
 		free(uvp, M_80211_VAP);
+
+		URTWM_LOCK(sc);
+		urtwm_vap_decrement_counters(sc, opmode, id);
+		URTWM_UNLOCK(sc);
+
 		return (NULL);
 	}
 
@@ -828,7 +984,10 @@ urtwm_vap_create(struct ieee80211com *ic, const char name[IFNAMSIZ], int unit,
 
 	/* override state transition machine */
 	uvp->newstate = vap->iv_newstate;
-	vap->iv_newstate = urtwm_newstate;
+	if (opmode == IEEE80211_M_MONITOR)
+		vap->iv_newstate = urtwm_monitor_newstate;
+	else
+		vap->iv_newstate = urtwm_newstate;
 	vap->iv_update_beacon = urtwm_update_beacon;
 	vap->iv_reset = urtwm_ioctl_reset;
 	vap->iv_key_alloc = urtwm_key_alloc;
@@ -852,8 +1011,22 @@ urtwm_vap_create(struct ieee80211com *ic, const char name[IFNAMSIZ], int unit,
 	/* complete setup */
 	ieee80211_vap_attach(vap, ieee80211_media_change,
 	    ieee80211_media_status, mac);
-	ic->ic_opmode = opmode;
+
+	URTWM_LOCK(sc);
+	urtwm_set_ic_opmode(sc);
+	if (sc->sc_flags & URTWM_RUNNING) {
+		if (uvp->id != URTWM_VAP_ID_INVALID)
+			urtwm_set_macaddr(sc, vap->iv_myaddr, uvp->id);
+
+		urtwm_rxfilter_update(sc);
+	}
+	URTWM_UNLOCK(sc);
+
 	return (vap);
+
+fail:
+	URTWM_UNLOCK(sc);
+	return (NULL);
 }
 
 static void
@@ -872,11 +1045,17 @@ urtwm_vap_delete(struct ieee80211vap *vap)
 		m_freem(uvp->bcn_mbuf);
 	/* Cancel any unfinished Tx. */
 	urtwm_vap_clear_tx(sc, vap);
+	urtwm_vap_decrement_counters(sc, vap->iv_opmode, uvp->id);
+	urtwm_set_ic_opmode(sc);
+	if (sc->sc_flags & URTWM_RUNNING)
+		urtwm_rxfilter_update(sc);
 	URTWM_UNLOCK(sc);
+
 	if (vap->iv_opmode == IEEE80211_M_IBSS) {
 		ieee80211_draintask(ic, &uvp->tsf_sync_adhoc_task);
 		callout_drain(&uvp->tsf_sync_adhoc);
 	}
+
 	ieee80211_ratectl_deinit(vap);
 	ieee80211_vap_detach(vap);
 	free(uvp, M_80211_VAP);
@@ -1213,14 +1392,19 @@ urtwm_rx_frame(struct urtwm_softc *sc, struct mbuf *m, int8_t *rssi)
 
 	if (ieee80211_radiotap_active(ic)) {
 		struct urtwm_rx_radiotap_header *tap = &sc->sc_rxtap;
+		int id = URTWM_VAP_ID_INVALID;
 
 		tap->wr_flags = 0;
 		if (le32toh(stat->rxdw4) & R92C_RXDW4_SGI)
 			tap->wr_flags |= IEEE80211_RADIOTAP_F_SHORTGI;
 
-		/* XXX TODO: multi-vap */
-		tap->wr_tsft = urtwm_get_tsf_high(sc, 0);
-		if (le32toh(stat->rxdw5) > urtwm_get_tsf_low(sc, 0))
+		if (ni != NULL)
+			id = URTWM_VAP(ni->ni_vap)->id;
+		if (id == URTWM_VAP_ID_INVALID)
+			id = 0;
+
+		tap->wr_tsft = urtwm_get_tsf_high(sc, id);
+		if (le32toh(stat->rxdw5) > urtwm_get_tsf_low(sc, id))
 			tap->wr_tsft--;
 		tap->wr_tsft = (uint64_t)htole32(tap->wr_tsft) << 32;
 		tap->wr_tsft += stat->rxdw5;
@@ -1462,6 +1646,45 @@ urtwm_free_tx_list(struct urtwm_softc *sc)
 }
 
 static void
+urtwm_r12a_transfer_submit(struct urtwm_softc *sc, struct usb_xfer *xfer,
+    struct urtwm_data *data)
+{
+	usbd_xfer_set_frame_data(xfer, 0, data->buf, data->buflen);
+	usbd_transfer_submit(xfer);
+}
+
+static void
+urtwm_r21a_transfer_submit(struct urtwm_softc *sc, struct usb_xfer *xfer,
+    struct urtwm_data *data)
+{
+
+	/*
+	 * Note: if this is a beacon frame, ensure that it will go
+	 * into appropriate queue.
+	 */
+	if (data->ni == NULL) {	/* beacon frame */
+		struct r12a_tx_desc *txd = (struct r12a_tx_desc *)data->buf;
+		uint8_t id;
+
+		id = MS(le32toh(txd->txdw6), R21A_TXDW6_MBSSID);
+
+		if (sc->cur_bcnq_id != id) {
+			/* Wait until any previous transmit completes. */
+			(void) urtwm_check_beacon_valid(sc, sc->cur_bcnq_id);
+
+			/* Change current port. */
+			urtwm_select_beacon(sc, id);
+			sc->cur_bcnq_id = id;
+		}
+
+		/* Reset 'beacon valid' bit. */
+		urtwm_reset_beacon_valid(sc, id);
+	}
+
+	urtwm_r12a_transfer_submit(sc, xfer, data);
+}
+
+static void
 urtwm_bulk_tx_callback(struct usb_xfer *xfer, usb_error_t error)
 {
 	struct urtwm_softc *sc = usbd_xfer_softc(xfer);
@@ -1488,8 +1711,7 @@ tr_setup:
 		}
 		STAILQ_REMOVE_HEAD(&sc->sc_tx_pending, next);
 		STAILQ_INSERT_TAIL(&sc->sc_tx_active, data, next);
-		usbd_xfer_set_frame_data(xfer, 0, data->buf, data->buflen);
-		usbd_transfer_submit(xfer);
+		urtwm_transfer_submit(sc, xfer, data);
 		if (!(sc->sc_flags & URTWM_FW_LOADED))
 			sc->sc_tx_n_active++;
 		break;
@@ -2110,7 +2332,7 @@ urtwm_read_chipid(struct urtwm_softc *sc)
 
 	reg = urtwm_read_4(sc, R92C_SYS_CFG);
 	if (reg & R92C_SYS_CFG_TRP_VAUX_EN)	/* test chip */
-		return (EIO);
+		return (EOPNOTSUPP);
 
 	if (URTWM_CHIP_IS_12A(sc)) {
 		if (MS(reg, R92C_SYS_CFG_CHIP_VER_RTL) == 1)
@@ -2282,6 +2504,11 @@ urtwm_config_specific(struct urtwm_softc *sc)
 		sc->ntxchains = 1;
 		sc->nrxchains = 1;
 	}
+
+	if (URTWM_CHIP_HAS_BCNQ1(sc))
+		sc->sc_transfer_submit = urtwm_r21a_transfer_submit;
+	else
+		sc->sc_transfer_submit = urtwm_r12a_transfer_submit;
 
 	if (usbd_get_speed(sc->sc_udev) == USB_SPEED_SUPER) {
 		sc->ac_usb_dma_size = 0x07;
@@ -2681,8 +2908,9 @@ urtwm_ioctl_reset(struct ieee80211vap *vap, u_long cmd)
 	case IEEE80211_IOC_POWERSAVESLEEP:
 	{
 		struct urtwm_softc *sc = vap->iv_ic->ic_softc;
+		struct urtwm_vap *uvp = URTWM_VAP(vap);
 
-		if (vap->iv_opmode == IEEE80211_M_STA) {
+		if (vap->iv_opmode == IEEE80211_M_STA && uvp->id == 0) {
 			URTWM_LOCK(sc);
 			if (sc->sc_flags & URTWM_RUNNING)
 				error = urtwm_set_pwrmode(sc, vap, 1);
@@ -2708,6 +2936,61 @@ urtwm_ioctl_reset(struct ieee80211vap *vap, u_long cmd)
 }
 
 static void
+urtwm_reset_beacon_valid(struct urtwm_softc *sc, int id)
+{
+	uint16_t reg;
+
+	if (URTWM_CHIP_HAS_BCNQ1(sc) && id != 0)
+		reg = R12A_DWBCN1_CTRL;
+	else
+		reg = R92C_TDECTRL;
+
+	urtwm_setbits_1_shift(sc, reg, R92C_TDECTRL_BCN_VALID, 0, 2);
+}
+
+static int
+urtwm_check_beacon_valid(struct urtwm_softc *sc, int id)
+{
+	uint16_t reg;
+	int ntries;
+
+	if (id == URTWM_VAP_ID_INVALID)
+		return (0);
+
+	if (URTWM_CHIP_HAS_BCNQ1(sc) && id != 0)
+		reg = R12A_DWBCN1_CTRL;
+	else
+		reg = R92C_TDECTRL;
+
+	for (ntries = 0; ntries < 10; ntries++) {
+		if (urtwm_read_4(sc, reg) & R92C_TDECTRL_BCN_VALID) {
+			URTWM_DPRINTF(sc, URTWM_DEBUG_BEACON,
+			    "%s: frame was recognized\n", __func__);
+			break;
+		}
+		urtwm_delay(sc, 100);
+	}
+	if (ntries == 10)
+		return (ETIMEDOUT);
+
+	return (0);
+}
+
+static void
+urtwm_select_beacon(struct urtwm_softc *sc, int id)
+{
+	if (URTWM_CHIP_HAS_BCNQ1(sc) && id != 0) {
+		/* Switch to port 1 beacon. */
+		urtwm_setbits_1_shift(sc, R12A_DWBCN1_CTRL,
+		    0, R12A_DWBCN1_CTRL_SEL_BCN1, 2);
+	} else {
+		/* Switch to port 0 beacon. */
+		urtwm_setbits_1_shift(sc, R12A_DWBCN1_CTRL,
+		    R12A_DWBCN1_CTRL_SEL_BCN1, 0, 2);
+	}
+}
+
+static void
 urtwm_init_beacon(struct urtwm_softc *sc, struct urtwm_vap *uvp)
 {
 	struct r12a_tx_desc *txd = &uvp->bcn_desc;
@@ -2724,6 +3007,17 @@ urtwm_init_beacon(struct urtwm_softc *sc, struct urtwm_vap *uvp)
 	txd->txdw1 |= htole32(SM(R12A_TXDW1_MACID, URTWM_MACID_BC));
 
 	txd->txdw3 = htole32(R12A_TXDW3_DRVRATE);
+#ifdef URTWM_TODO
+	txd->txdw3 |= htole32(SM(R12A_TXDW3_SEQ_SEL, uvp->id));
+#else
+	if (URTWM_CHIP_HAS_BCNQ1(sc)) {
+		/* XXX sequence number for beacon 1 is not stable */
+		txd->txdw3 |= htole32(SM(R12A_TXDW3_SEQ_SEL, uvp->id * 2));
+	} else
+		txd->txdw3 |= htole32(SM(R12A_TXDW3_SEQ_SEL, uvp->id));
+#endif
+
+	txd->txdw6 = htole32(SM(R21A_TXDW6_MBSSID, uvp->id));
 }
 
 static int
@@ -2733,7 +3027,6 @@ urtwm_setup_beacon(struct urtwm_softc *sc, struct ieee80211_node *ni)
 	struct urtwm_vap *uvp = URTWM_VAP(vap);
 	struct r12a_tx_desc *txd = &uvp->bcn_desc;
 	struct mbuf *m;
-	int error;
 
 	URTWM_ASSERT_LOCKED(sc);
 
@@ -2759,14 +3052,7 @@ urtwm_setup_beacon(struct urtwm_softc *sc, struct ieee80211_node *ni)
 	} else
 		txd->txdw4 = htole32(SM(R12A_TXDW4_DATARATE, URTWM_RIDX_CCK1));
 
-	if ((error = urtwm_tx_beacon(sc, uvp)) != 0)
-		return (error);
-
-	/* XXX bcnq stuck workaround */
-	if ((error = urtwm_tx_beacon(sc, uvp)) != 0)
-		return (error);
-
-	return (0);
+	return (urtwm_tx_beacon_check(sc, uvp));
 }
 
 static void
@@ -2801,6 +3087,54 @@ urtwm_update_beacon(struct ieee80211vap *vap, int item)
 	URTWM_UNLOCK(sc);
 }
 
+#ifndef URTWM_WITHOUT_UCODE
+static int
+urtwm_tx_fwpkt_check(struct urtwm_softc *sc, struct ieee80211vap *vap)
+{
+	int ntries, error;
+
+	for (ntries = 0; ntries < 5; ntries++) {
+		error = urtwm_push_nulldata(sc, vap);
+		if (error == 0)
+			break;
+	}
+	if (ntries == 5) {
+		device_printf(sc->sc_dev,
+		    "%s: cannot push f/w frames into chip, error %d!\n",
+		    __func__, error);
+		return (error);
+	}
+
+	return (0);
+}
+#endif
+
+static int
+urtwm_tx_beacon_check(struct urtwm_softc *sc, struct urtwm_vap *uvp)
+{
+	int ntries, error;
+
+	for (ntries = 0; ntries < 5; ntries++) {
+		urtwm_reset_beacon_valid(sc, uvp->id);
+
+		error = urtwm_tx_beacon(sc, uvp);
+		if (error != 0)
+			continue;
+
+		error = urtwm_check_beacon_valid(sc, uvp->id);
+		if (error == 0)
+			break;
+	}
+	if (ntries == 5) {
+		device_printf(sc->sc_dev,
+		    "%s: cannot push beacon into chip, error %d!\n",
+		    __func__, error);
+		return (error);
+	}
+
+	return (0);
+}
+
 /*
  * Push a beacon frame into the chip. Beacon will
  * be repeated by the chip every R92C_BCN_INTERVAL.
@@ -2828,6 +3162,7 @@ static int
 urtwm_construct_nulldata(struct urtwm_softc *sc, struct ieee80211vap *vap,
     uint8_t *ptr, int qos)
 {
+	struct urtwm_vap *uvp = URTWM_VAP(vap);
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct r12a_tx_desc *txd;
 	struct ieee80211_frame *wh;
@@ -2839,6 +3174,7 @@ urtwm_construct_nulldata(struct urtwm_softc *sc, struct ieee80211vap *vap,
 	    SM(R12A_TXDW1_QSEL, R12A_TXDW1_QSEL_MGNT));
 
 	txd->txdw3 = htole32(R12A_TXDW3_DRVRATE);
+	txd->txdw6 = htole32(SM(R21A_TXDW6_MBSSID, uvp->id));
 	if (ic->ic_curmode == IEEE80211_MODE_11B) {
 		txd->txdw4 = htole32(SM(R12A_TXDW4_DATARATE,
 		    URTWM_RIDX_CCK1));
@@ -2865,6 +3201,7 @@ urtwm_construct_nulldata(struct urtwm_softc *sc, struct ieee80211vap *vap,
 		qwh->i_qos[0] = tid & IEEE80211_QOS_TID;
 	} else {
 		txd->txdw8 = htole32(R12A_TXDW8_HWSEQ_EN);
+		txd->txdw3 |= htole32(SM(R12A_TXDW3_SEQ_SEL, uvp->id));
 
 		txd->pktlen = htole16(sizeof(*wh));
 		wh->i_fc[0] |= IEEE80211_FC0_SUBTYPE_NODATA;
@@ -2885,7 +3222,7 @@ urtwm_push_nulldata(struct urtwm_softc *sc, struct ieee80211vap *vap)
 	struct r12a_tx_desc *txd;
 	struct urtwm_data *data;
 	uint8_t *ptr;
-	int required_size, bcn_size, null_size, error, ntries;
+	int required_size, bcn_size, null_size, error;
 
 	if (!(sc->sc_flags & URTWM_FW_LOADED))
 		return (0);	/* requires firmware */
@@ -2935,25 +3272,19 @@ urtwm_push_nulldata(struct urtwm_softc *sc, struct ieee80211vap *vap)
 	urtwm_setbits_1_shift(sc, R92C_CR, 0, R92C_CR_ENSWBCN, 1);
 	urtwm_setbits_1_shift(sc, R92C_FWHW_TXQ_CTRL,
 	    R92C_FWHW_TXQ_CTRL_REAL_BEACON, 0, 2);
+
 	/* Clear 'beacon valid' bit. */
-	urtwm_setbits_1_shift(sc, R92C_TDECTRL, R92C_TDECTRL_BCN_VALID, 0, 2);
+	urtwm_reset_beacon_valid(sc, uvp->id);
 
 	data->buflen = required_size;
 	STAILQ_INSERT_TAIL(&sc->sc_tx_pending, data, next);
 	usbd_transfer_start(sc->sc_xfer[URTWM_BULK_TX_VO]);
 
-	for (ntries = 0; ntries < 10; ntries++) {
-		if (urtwm_read_4(sc, R92C_TDECTRL) & R92C_TDECTRL_BCN_VALID) {
-			URTWM_DPRINTF(sc, URTWM_DEBUG_BEACON,
-			    "%s: frame was recognized\n", __func__);
-			break;
-		}
-		urtwm_delay(sc, 100);
-	}
-	if (ntries == 10) {
-		device_printf(sc->sc_dev, "%s: frame was not recognized!\n",
-		    __func__);
-		return (EINVAL);
+	error = urtwm_check_beacon_valid(sc, uvp->id);
+	if (error != 0) {
+		URTWM_DPRINTF(sc, URTWM_DEBUG_BEACON,
+		    "%s: frame was not recognized!\n", __func__);
+		goto fail;
 	}
 
 	/* Setup addresses in firmware. */
@@ -2967,22 +3298,24 @@ urtwm_push_nulldata(struct urtwm_softc *sc, struct ieee80211vap *vap)
 		device_printf(sc->sc_dev,
 		    "%s: CMD_RSVD_PAGE was not sent, error %d\n",
 		    __func__, error);
-		return (error);
+		goto fail;
 	}
 
+fail:
 	/* Re-enable beacon detection. */
 	urtwm_setbits_1_shift(sc, R92C_FWHW_TXQ_CTRL,
 	    0, R92C_FWHW_TXQ_CTRL_REAL_BEACON, 2);
 	urtwm_setbits_1_shift(sc, R92C_CR, R92C_CR_ENSWBCN, 0, 1);
 
-	/* Setup power management. */
-	/*
-	 * NB: it will be enabled immediately - delay it,
-	 * so 4-Way handshake will not be interrupted.
-	 */
-	callout_reset(&sc->sc_pwrmode_init, 5*hz, urtwm_pwrmode_init, sc);
+	/* Restore beacon (if present). */
+	if (sc->bcn_vaps > 0 && sc->vaps[!uvp->id] != NULL) {
+		struct urtwm_vap *uvp2 = sc->vaps[!uvp->id];
 
-	return (0);
+		if (uvp2->vap.iv_state >= IEEE80211_S_RUN)
+			error = urtwm_tx_beacon_check(sc, uvp2);
+	}
+
+	return (error);
 }
 
 static void
@@ -3075,12 +3408,10 @@ urtwm_key_alloc(struct ieee80211vap *vap, struct ieee80211_key *k,
 		if (!(k->wk_flags & IEEE80211_KEY_SWCRYPT)) {
 			URTWM_LOCK(sc);
 			/*
-			 * First 4 slots for group keys,
-			 * what is left - for pairwise.
-			 * XXX incompatible with IBSS RSN.
+			 * Current slot usage:
+			 * everything for pairwise keys.
 			 */
-			for (i = IEEE80211_WEP_NKID;
-			     i < R12A_CAM_ENTRY_COUNT; i++) {
+			for (i = 0; i < R12A_CAM_ENTRY_COUNT; i++) {
 				if ((sc->keys_bmap & (1 << i)) == 0) {
 					sc->keys_bmap |= 1 << i;
 					*keyix = i;
@@ -3098,6 +3429,8 @@ urtwm_key_alloc(struct ieee80211vap *vap, struct ieee80211_key *k,
 			*keyix = 0;
 	} else {
 		*keyix = k - vap->iv_nw_keys;
+		/* XXX will be overridden during group key handshake */
+		k->wk_flags |= IEEE80211_KEY_SWCRYPT;
 	}
 	*rxkeyix = *keyix;
 	return 1;
@@ -3110,10 +3443,7 @@ urtwm_key_set_cb(struct urtwm_softc *sc, union sec_param *data)
 	uint8_t algo, keyid;
 	int i, error;
 
-	if (k->wk_keyix < IEEE80211_WEP_NKID)
-		keyid = k->wk_keyix;
-	else
-		keyid = 0;
+	keyid = 0;
 
 	/* Map net80211 cipher to HW crypto algorithm. */
 	switch (k->wk_cipher->ic_cipher) {
@@ -3196,7 +3526,6 @@ urtwm_process_key(struct ieee80211vap *vap, const struct ieee80211_key *k,
     int set)
 {
 	struct urtwm_softc *sc = vap->iv_ic->ic_softc;
-	struct urtwm_vap *uvp = URTWM_VAP(vap);
 
 	if (k->wk_flags & IEEE80211_KEY_SWCRYPT) {
 		/* Not for us. */
@@ -3205,17 +3534,15 @@ urtwm_process_key(struct ieee80211vap *vap, const struct ieee80211_key *k,
 
 	if (&vap->iv_nw_keys[0] <= k &&
 	    k < &vap->iv_nw_keys[IEEE80211_WEP_NKID]) {
-		URTWM_LOCK(sc);		/* XXX */
-		uvp->keys[k->wk_keyix] = set ? k : NULL;
-		if ((sc->sc_flags & URTWM_RUNNING) == 0) {
-			/*
-			 * The device was not started;
-			 * the key will be installed later.
-			 */
-			URTWM_UNLOCK(sc);
-			return (1);
-		}
-		URTWM_UNLOCK(sc);
+		struct ieee80211_key *k1 = &vap->iv_nw_keys[k->wk_keyix];
+
+		/*
+		 * Do not offload group keys;
+		 * multicast key search is too problematic with 2+ vaps.
+		 */
+		/* XXX fix net80211 instead */
+		k1->wk_flags |= IEEE80211_KEY_SWCRYPT;
+		return (k->wk_cipher->ic_setkey(k1));
 	}
 
 	return (!urtwm_cmd_sleepable(sc, k, sizeof(*k),
@@ -3268,14 +3595,16 @@ urtwm_tsf_sync_adhoc_task(void *arg, int pending)
 	/* Accept beacons with the same BSSID. */
 	urtwm_set_rx_bssid_all(sc, 0);
 
-        /* Enable synchronization. */
-	urtwm_setbits_1(sc, R92C_BCN_CTRL, R92C_BCN_CTRL_DIS_TSF_UDT0, 0);
+	/* Enable synchronization. */
+	urtwm_setbits_1(sc, R92C_BCN_CTRL(uvp->id),
+	    R92C_BCN_CTRL_DIS_TSF_UDT0, 0);
 
 	/* Synchronize. */
 	usb_pause_mtx(&sc->sc_mtx, hz * ni->ni_intval * 5 / 1000);
 
 	/* Disable synchronization. */
-	urtwm_setbits_1(sc, R92C_BCN_CTRL, 0, R92C_BCN_CTRL_DIS_TSF_UDT0);
+	urtwm_setbits_1(sc, R92C_BCN_CTRL(uvp->id),
+	    0, R92C_BCN_CTRL_DIS_TSF_UDT0);
 
 	/* Accept all beacons. */
 	urtwm_set_rx_bssid_all(sc, 1);
@@ -3294,20 +3623,21 @@ urtwm_tsf_sync_enable(struct urtwm_softc *sc, struct ieee80211vap *vap)
 	struct urtwm_vap *uvp = URTWM_VAP(vap);
 
 	/* Reset TSF. */
-	urtwm_write_1(sc, R92C_DUAL_TSF_RST, R92C_DUAL_TSF_RST0);
+	urtwm_write_1(sc, R92C_DUAL_TSF_RST, R92C_DUAL_TSF_RESET(uvp->id));
 
 	switch (vap->iv_opmode) {
 	case IEEE80211_M_STA:
 		/* Enable TSF synchronization. */
-		urtwm_setbits_1(sc, R92C_BCN_CTRL, R92C_BCN_CTRL_DIS_TSF_UDT0,
-		    0);
+		urtwm_setbits_1(sc, R92C_BCN_CTRL(uvp->id),
+		    R92C_BCN_CTRL_DIS_TSF_UDT0, 0);
 		break;
 	case IEEE80211_M_IBSS:
 		ieee80211_runtask(ic, &uvp->tsf_sync_adhoc_task);
 		/* FALLTHROUGH */
 	case IEEE80211_M_HOSTAP:
 		/* Enable beaconing. */
-		urtwm_setbits_1(sc, R92C_BCN_CTRL, 0, R92C_BCN_CTRL_EN_BCN);
+		urtwm_setbits_1(sc, R92C_BCN_CTRL(uvp->id),
+		    0, R92C_BCN_CTRL_EN_BCN);
 		break;
 	default:
 		device_printf(sc->sc_dev, "undefined opmode %d\n",
@@ -3401,12 +3731,59 @@ urtwm_adhoc_recv_mgmt(struct ieee80211_node *ni, struct mbuf *m, int subtype,
 	    subtype == IEEE80211_FC0_SUBTYPE_PROBE_RESP)) {
 		ni_tstamp = le64toh(ni->ni_tstamp.tsf);
 		URTWM_LOCK(sc);
-		urtwm_get_tsf(sc, &curr_tstamp, 0);
+		urtwm_get_tsf(sc, &curr_tstamp, uvp->id);
 		URTWM_UNLOCK(sc);
 
 		if (ni_tstamp >= curr_tstamp)
 			(void) ieee80211_ibss_merge(ni);
 	}
+}
+
+static int
+urtwm_monitor_newstate(struct ieee80211vap *vap, enum ieee80211_state nstate,
+    int arg)
+{
+	struct ieee80211com *ic = vap->iv_ic;
+	struct urtwm_softc *sc = ic->ic_softc;
+	struct urtwm_vap *uvp = URTWM_VAP(vap);
+
+	URTWM_DPRINTF(sc, URTWM_DEBUG_STATE, "%s -> %s\n",
+	    ieee80211_state_name[vap->iv_state],
+	    ieee80211_state_name[nstate]);
+
+	if (vap->iv_state != nstate) {
+		IEEE80211_UNLOCK(ic);
+		URTWM_LOCK(sc);
+
+		switch (nstate) {
+		case IEEE80211_S_INIT:
+			sc->vaps_running--;
+			sc->monvaps_running--;
+
+			if (sc->vaps_running == 0) {
+				/* Turn link LED off. */
+				urtwm_set_led(sc, URTWM_LED_LINK, 0);
+			}
+			break;
+		case IEEE80211_S_RUN:
+			sc->vaps_running++;
+			sc->monvaps_running++;
+
+			if (sc->vaps_running == 1) {
+				/* Turn link LED on. */
+				urtwm_set_led(sc, URTWM_LED_LINK, 1);
+			}
+			break;
+		default:
+			/* NOTREACHED */
+			break;
+		}
+
+		URTWM_UNLOCK(sc);
+		IEEE80211_LOCK(ic);
+	}
+
+	return (uvp->newstate(vap, nstate, arg));
 }
 
 static int
@@ -3419,64 +3796,83 @@ urtwm_newstate(struct ieee80211vap *vap, enum ieee80211_state nstate, int arg)
 	enum ieee80211_state ostate;
 	uint32_t reg;
 	uint8_t mode;
-	int error = 0;
+	int error, early_newstate;
 
 	ostate = vap->iv_state;
 	URTWM_DPRINTF(sc, URTWM_DEBUG_STATE, "%s -> %s\n",
 	    ieee80211_state_name[ostate], ieee80211_state_name[nstate]);
 
+	if (vap->iv_bss->ni_chan == IEEE80211_CHAN_ANYC &&
+	    ostate == IEEE80211_S_INIT && nstate == IEEE80211_S_RUN) {
+		/* need to call iv_newstate() firstly */
+		error = uvp->newstate(vap, nstate, arg);
+		if (error != 0)
+			return (error);
+
+		early_newstate = 1;
+	} else
+		early_newstate = 0;
+
 	IEEE80211_UNLOCK(ic);
 	URTWM_LOCK(sc);
 	if (ostate == IEEE80211_S_RUN) {
-		/* Stop calibration. */
-		callout_stop(&sc->sc_calib_to);
+		sc->vaps_running--;
 
 		if (vap->iv_opmode == IEEE80211_M_IBSS) {
 			/* Stop periodical TSF synchronization. */
 			callout_stop(&uvp->tsf_sync_adhoc);
 		}
 
-#ifndef URTWM_WITHOUT_UCODE
-		/* Disable power management. */
-		callout_stop(&sc->sc_pwrmode_init);
-		urtwm_set_pwrmode(sc, vap, 0);
-#endif
-
-		/* Turn link LED off. */
-		urtwm_set_led(sc, URTWM_LED_LINK, 0);
-
 		/* Set media status to 'No Link'. */
-		urtwm_set_mode(sc, R92C_MSR_NOLINK, 0);
-
-		/* Stop Rx of data frames. */
-		urtwm_write_2(sc, R92C_RXFLTMAP2, 0);
+		urtwm_set_mode(sc, R92C_MSR_NOLINK, uvp->id);
 
 		/* Disable TSF synchronization / beaconing. */
-		urtwm_setbits_1(sc, R92C_BCN_CTRL, R92C_BCN_CTRL_EN_BCN,
-		    R92C_BCN_CTRL_DIS_TSF_UDT0);
+		urtwm_setbits_1(sc, R92C_BCN_CTRL(uvp->id),
+		    R92C_BCN_CTRL_EN_BCN, R92C_BCN_CTRL_DIS_TSF_UDT0);
 
-		/* Reset TSF. */
-		urtwm_write_1(sc, R92C_DUAL_TSF_RST, R92C_DUAL_TSF_RST0);
+		/* NB: monitor mode vaps are using port 0. */
+		if (uvp->id != 0 || sc->monvaps_running == 0) {
+			/* Reset TSF. */
+			urtwm_write_1(sc, R92C_DUAL_TSF_RST,
+			    R92C_DUAL_TSF_RESET(uvp->id));
+		}
 
-		/* Reset EDCA parameters. */
-		urtwm_write_4(sc, R92C_EDCA_VO_PARAM, 0x002f3217);
-		urtwm_write_4(sc, R92C_EDCA_VI_PARAM, 0x005e4317);
-		urtwm_write_4(sc, R92C_EDCA_BE_PARAM, 0x00105320);
-		urtwm_write_4(sc, R92C_EDCA_BK_PARAM, 0x0000a444);
+#ifndef URTWM_WITHOUT_UCODE
+		if (uvp->id == 0) {
+			/* Disable power management. */
+			callout_stop(&sc->sc_pwrmode_init);
+			urtwm_set_pwrmode(sc, vap, 0);
+		}
+#endif
+
+		if (sc->vaps_running == sc->monvaps_running) {
+			/* Stop calibration. */
+			callout_stop(&sc->sc_calib_to);
+
+			/* Stop Rx of data frames. */
+			urtwm_write_2(sc, R92C_RXFLTMAP2, 0);
+
+			/* Reset EDCA parameters. */
+			urtwm_write_4(sc, R92C_EDCA_VO_PARAM, 0x002f3217);
+			urtwm_write_4(sc, R92C_EDCA_VI_PARAM, 0x005e4317);
+			urtwm_write_4(sc, R92C_EDCA_BE_PARAM, 0x00105320);
+			urtwm_write_4(sc, R92C_EDCA_BK_PARAM, 0x0000a444);
+
+			if (sc->vaps_running == 0) {
+				/* Turn link LED off. */
+				urtwm_set_led(sc, URTWM_LED_LINK, 0);
+			}
+		}
 	}
 
+	error = 0;
 	switch (nstate) {
 	case IEEE80211_S_SCAN:
 		/* Pause AC Tx queues. */
-		urtwm_setbits_1(sc, R92C_TXPAUSE, 0, R92C_TX_QUEUE_AC);
+		if (sc->vaps_running == 0)
+			urtwm_setbits_1(sc, R92C_TXPAUSE, 0, R92C_TX_QUEUE_AC);
 		break;
 	case IEEE80211_S_RUN:
-		if (vap->iv_opmode == IEEE80211_M_MONITOR) {
-			/* Turn link LED on. */
-			urtwm_set_led(sc, URTWM_LED_LINK, 1);
-			break;
-		}
-
 		ni = ieee80211_ref_node(vap->iv_bss);
 
 		if (ic->ic_bsschan == IEEE80211_CHAN_ANYC ||
@@ -3505,42 +3901,55 @@ urtwm_newstate(struct ieee80211vap *vap, enum ieee80211_state nstate, int arg)
 		}
 
 		/* Set media status to 'Associated'. */
-		urtwm_set_mode(sc, mode, 0);
+		urtwm_set_mode(sc, mode, uvp->id);
 
 		/* Set AssocID. */
+		/* XXX multi-vap? */
 		urtwm_write_2(sc, R92C_BCN_PSR_RPT,
 		    0xc000 | IEEE80211_NODE_AID(ni));
 
 		/* Set BSSID. */
-		urtwm_write_4(sc, R92C_BSSID + 0, le32dec(&ni->ni_bssid[0]));
-		urtwm_write_4(sc, R92C_BSSID + 4, le16dec(&ni->ni_bssid[4]));
-
-		/* Enable Rx of data frames. */
-		urtwm_write_2(sc, R92C_RXFLTMAP2, 0xffff);
-
-		/* Flush all AC queues. */
-		urtwm_write_1(sc, R92C_TXPAUSE, 0);
+		urtwm_set_bssid(sc, ni->ni_bssid, uvp->id);
 
 		/* Set beacon interval. */
-		urtwm_write_2(sc, R92C_BCN_INTERVAL, ni->ni_intval);
+		urtwm_write_2(sc, R92C_BCN_INTERVAL(uvp->id), ni->ni_intval);
+
+		if (sc->vaps_running == sc->monvaps_running) {
+			/* Enable Rx of data frames. */
+			urtwm_write_2(sc, R92C_RXFLTMAP2, 0xffff);
+
+			/* Flush all AC queues. */
+			urtwm_write_1(sc, R92C_TXPAUSE, 0);
+		}
 
 		/* Allow Rx from our BSSID only. */
 		if (ic->ic_promisc == 0) {
 			reg = urtwm_read_4(sc, R92C_RCR);
 
-			if (vap->iv_opmode != IEEE80211_M_HOSTAP) {
+			if (sc->bcn_vaps == 0)
+				reg |= R92C_RCR_CBSSID_BCN;
+			if (sc->ap_vaps == 0)
 				reg |= R92C_RCR_CBSSID_DATA;
-				if (vap->iv_opmode != IEEE80211_M_IBSS)
-					reg |= R92C_RCR_CBSSID_BCN;
-			}
 
 			urtwm_write_4(sc, R92C_RCR, reg);
 		}
 
 #ifndef URTWM_WITHOUT_UCODE
 		/* Upload (QoS) Null Data frame to firmware. */
-		if (vap->iv_opmode == IEEE80211_M_STA)
-			urtwm_push_nulldata(sc, vap);
+		/* Note: do this for port 0 only. */
+		if (vap->iv_opmode == IEEE80211_M_STA && uvp->id == 0) {
+			error = urtwm_tx_fwpkt_check(sc, vap);
+			if (error != 0)
+				goto end_run;
+
+			/* Setup power management. */
+			/*
+			 * NB: it will be enabled immediately - delay it,
+			 * so 4-Way handshake will not be interrupted.
+			 */
+			callout_reset(&sc->sc_pwrmode_init, 5*hz,
+			    urtwm_pwrmode_init, sc);
+		}
 #endif
 
 		if (vap->iv_opmode == IEEE80211_M_HOSTAP ||
@@ -3564,17 +3973,27 @@ urtwm_newstate(struct ieee80211vap *vap, enum ieee80211_state nstate, int arg)
 		urtwn_write_1(sc, R92C_MAC_SPEC_SIFS + 1, 10);
 		urtwn_write_1(sc, R92C_R2T_SIFS + 1, 10);
 		urtwn_write_1(sc, R92C_T2T_SIFS + 1, 10);
+
+		/* Initialize rate adaptation. */
+		urtwm_ra_init(sc);
 #endif
 
-		/* Turn link LED on. */
-		urtwm_set_led(sc, URTWM_LED_LINK, 1);
+		if (sc->vaps_running == sc->monvaps_running) {
+			/* Reset temperature calibration state machine. */
+			sc->sc_flags &= ~URTWM_TEMP_MEASURED;
+			sc->thcal_temp = sc->thermal_meter;
 
-		/* Reset temperature calibration state machine. */
-		sc->sc_flags &= ~URTWM_TEMP_MEASURED;
-		sc->thcal_temp = sc->thermal_meter;
+			/* Start periodic calibration. */
+			callout_reset(&sc->sc_calib_to, 2*hz, urtwm_calib_to,
+			    sc);
 
-		/* Start periodic calibration. */
-		callout_reset(&sc->sc_calib_to, 2*hz, urtwm_calib_to, sc);
+			if (sc->vaps_running == 0) {
+				/* Turn link LED on. */
+				urtwm_set_led(sc, URTWM_LED_LINK, 1);
+			}
+		}
+
+		sc->vaps_running++;
 
 end_run:
 		ieee80211_free_node(ni);
@@ -3585,7 +4004,10 @@ end_run:
 
 	URTWM_UNLOCK(sc);
 	IEEE80211_LOCK(ic);
-	return (error != 0 ? error : uvp->newstate(vap, nstate, arg));
+	if (error != 0)
+		return (error);
+
+	return (early_newstate ? 0 : uvp->newstate(vap, nstate, arg));
 }
 
 static void
@@ -3603,7 +4025,7 @@ urtwm_calib_cb(struct urtwm_softc *sc, union sec_param *data)
 	/* Do temperature compensation. */
 	urtwm_temp_calib(sc);
 
-	if ((urtwm_read_1(sc, R92C_MSR) & R92C_MSR_MASK) != R92C_MSR_NOLINK)
+	if (sc->vaps_running > sc->monvaps_running)
 		callout_reset(&sc->sc_calib_to, 2*hz, urtwm_calib_to, sc);
 }
 
@@ -3837,6 +4259,7 @@ urtwm_tx_data(struct urtwm_softc *sc, struct ieee80211_node *ni,
 	const struct ieee80211_txparam *tp;
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct ieee80211vap *vap = ni->ni_vap;
+	struct urtwm_vap *uvp = URTWM_VAP(vap);
 	struct ieee80211_key *k = NULL;
 	struct ieee80211_channel *chan;
 	struct ieee80211_frame *wh;
@@ -3965,6 +4388,7 @@ urtwm_tx_data(struct urtwm_softc *sc, struct ieee80211_node *ni,
 
 	txd->txdw1 |= htole32(SM(R12A_TXDW1_MACID, macid));
 	txd->txdw4 |= htole32(SM(R12A_TXDW4_DATARATE, ridx));
+	txd->txdw6 |= htole32(SM(R21A_TXDW6_MBSSID, uvp->id));
 	urtwm_tx_raid(sc, txd, ni, ismcast);
 
 	/* Force this rate if needed. */
@@ -3976,6 +4400,7 @@ urtwm_tx_data(struct urtwm_softc *sc, struct ieee80211_node *ni,
 	if (!hasqos) {
 		/* Use HW sequence numbering for non-QoS frames. */
 		txd->txdw8 |= htole32(R12A_TXDW8_HWSEQ_EN);
+		txd->txdw3 |= htole32(SM(R12A_TXDW3_SEQ_SEL, uvp->id));
 	} else {
 		uint16_t seqno;
 
@@ -4035,6 +4460,7 @@ urtwm_tx_raw(struct urtwm_softc *sc, struct ieee80211_node *ni,
     const struct ieee80211_bpf_params *params)
 {
 	struct ieee80211vap *vap = ni->ni_vap;
+	struct urtwm_vap *uvp = URTWM_VAP(vap);
 	struct ieee80211_key *k = NULL;
 	struct ieee80211_frame *wh;
 	struct r12a_tx_desc *txd;
@@ -4100,12 +4526,14 @@ urtwm_tx_raw(struct urtwm_softc *sc, struct ieee80211_node *ni,
 	ridx = rate2ridx(params->ibp_rate0);
 	txd->txdw4 |= htole32(SM(R12A_TXDW4_DATARATE, ridx));
 	txd->txdw4 |= htole32(SM(R12A_TXDW4_DATARATE_FB_LMT, 0x1f));
+	txd->txdw6 |= htole32(SM(R21A_TXDW6_MBSSID, uvp->id));
 	txd->txdw3 |= htole32(R12A_TXDW3_DRVRATE);
 	urtwm_tx_raid(sc, txd, ni, ismcast);
 
 	if (!IEEE80211_QOS_HAS_SEQ(wh)) {
 		/* Use HW sequence numbering for non-QoS frames. */
 		txd->txdw8 |= htole32(R12A_TXDW8_HWSEQ_EN);
+		txd->txdw3 |= htole32(SM(R12A_TXDW3_SEQ_SEL, uvp->id));
 	} else {
 		/* Set sequence number. */
 		txd->txdw9 |= htole32(SM(R12A_TXDW9_SEQ,
@@ -4242,6 +4670,7 @@ static void
 urtwm_parent(struct ieee80211com *ic)
 {
 	struct urtwm_softc *sc = ic->ic_softc;
+	struct ieee80211vap *vap;
 
 	URTWM_LOCK(sc);
 	if (sc->sc_flags & URTWM_DETACHED) {
@@ -4252,9 +4681,10 @@ urtwm_parent(struct ieee80211com *ic)
 
 	if (ic->ic_nrunning > 0) {
 		if (urtwm_init(sc) != 0) {
-			struct ieee80211vap *vap = TAILQ_FIRST(&ic->ic_vaps);
-			if (vap != NULL)
-				ieee80211_stop(vap);
+			IEEE80211_LOCK(ic);
+			TAILQ_FOREACH(vap, &ic->ic_vaps, iv_next)
+				ieee80211_stop_locked(vap);
+			IEEE80211_UNLOCK(ic);
 		} else
 			ieee80211_start_all(ic);
 	} else
@@ -5559,41 +5989,47 @@ urtwm_cam_write(struct urtwm_softc *sc, uint32_t addr, uint32_t data)
 }
 
 static void
+urtwm_rxfilter_update_mgt(struct urtwm_softc *sc)
+{
+	uint16_t filter;
+
+	filter = 0x7f3f;
+	if (sc->bcn_vaps == 0) {	/* STA and/or MONITOR mode vaps */
+		filter &= ~(
+		    R92C_RXFLTMAP_SUBTYPE(IEEE80211_FC0_SUBTYPE_ASSOC_REQ) |
+		    R92C_RXFLTMAP_SUBTYPE(IEEE80211_FC0_SUBTYPE_REASSOC_REQ) |
+		    R92C_RXFLTMAP_SUBTYPE(IEEE80211_FC0_SUBTYPE_PROBE_REQ));
+	}
+	if (sc->ap_vaps == sc->nvaps - sc->mon_vaps) {	/* AP vaps only */
+		filter &= ~(
+		    R92C_RXFLTMAP_SUBTYPE(IEEE80211_FC0_SUBTYPE_ASSOC_RESP) |
+		    R92C_RXFLTMAP_SUBTYPE(IEEE80211_FC0_SUBTYPE_REASSOC_RESP));
+	}
+	urtwm_write_2(sc, R92C_RXFLTMAP0, filter);
+}
+
+static void
+urtwm_rxfilter_update(struct urtwm_softc *sc)
+{
+
+	URTWM_ASSERT_LOCKED(sc);
+
+	/* Filter for management frames. */
+	urtwm_rxfilter_update_mgt(sc);
+
+	/* Update Rx filter. */
+	urtwm_set_promisc(sc);
+}
+
+static void
 urtwm_rxfilter_init(struct urtwm_softc *sc)
 {
-	struct ieee80211com *ic = &sc->sc_ic;
-	struct ieee80211vap *vap = TAILQ_FIRST(&ic->ic_vaps);
 	uint32_t rcr;
-	uint16_t filter;
 
 	URTWM_ASSERT_LOCKED(sc);
 
 	/* Setup multicast filter. */
 	urtwm_set_multi(sc);
-
-	/* Filter for management frames. */
-	filter = 0x7f3f;
-	switch (vap->iv_opmode) {
-	case IEEE80211_M_STA:
-		filter &= ~(
-		    R92C_RXFLTMAP_SUBTYPE(IEEE80211_FC0_SUBTYPE_ASSOC_REQ) |
-		    R92C_RXFLTMAP_SUBTYPE(IEEE80211_FC0_SUBTYPE_REASSOC_REQ) |
-		    R92C_RXFLTMAP_SUBTYPE(IEEE80211_FC0_SUBTYPE_PROBE_REQ));
-		break;
-	case IEEE80211_M_HOSTAP:
-		filter &= ~(
-		    R92C_RXFLTMAP_SUBTYPE(IEEE80211_FC0_SUBTYPE_ASSOC_RESP) |
-		    R92C_RXFLTMAP_SUBTYPE(IEEE80211_FC0_SUBTYPE_REASSOC_RESP));
-		break;
-	case IEEE80211_M_MONITOR:
-	case IEEE80211_M_IBSS:
-		break;
-	default:
-		device_printf(sc->sc_dev, "%s: undefined opmode %d\n",
-		    __func__, vap->iv_opmode);
-		break;
-	}
-	urtwm_write_2(sc, R92C_RXFLTMAP0, filter);
 
 	/* Reject all control frames. */
 	urtwm_write_2(sc, R92C_RXFLTMAP1, 0x0000);
@@ -5609,19 +6045,11 @@ urtwm_rxfilter_init(struct urtwm_softc *sc)
 	if (sc->sc_flags & (URTWM_RXCKSUM_EN | URTWM_RXCKSUM6_EN))
 		rcr |= R12A_RCR_TCP_OFFLD_EN;
 
-	if (vap->iv_opmode == IEEE80211_M_MONITOR) {
-		/* Accept all frames. */
-		rcr |= R92C_RCR_ACF | R92C_RCR_ADF | R92C_RCR_AMF |
-		       R92C_RCR_AAP;
-	}
-
 	/* Set Rx filter. */
 	urtwm_write_4(sc, R92C_RCR, rcr);
 
-	if (ic->ic_promisc != 0) {
-		/* Update Rx filter. */
-		urtwm_set_promisc(sc);
-	}
+	/* Update dynamic Rx filter parts. */
+	urtwm_rxfilter_update(sc);
 }
 
 static void
@@ -5874,8 +6302,7 @@ urtwm_scan_start(struct ieee80211com *ic)
 
 	URTWM_LOCK(sc);
 	/* Receive beacons / probe responses from any BSSID. */
-	if (ic->ic_opmode != IEEE80211_M_IBSS &&
-	    ic->ic_opmode != IEEE80211_M_HOSTAP)
+	if (sc->bcn_vaps == 0)
 		urtwm_set_rx_bssid_all(sc, 1);
 	URTWM_UNLOCK(sc);
 }
@@ -5897,20 +6324,14 @@ static void
 urtwm_scan_end(struct ieee80211com *ic)
 {
 	struct urtwm_softc *sc = ic->ic_softc;
-	struct ieee80211vap *vap;
 
 	URTWM_LOCK(sc);
 	/* Restore limitations. */
-	if (ic->ic_promisc == 0 &&
-	    ic->ic_opmode != IEEE80211_M_IBSS &&
-	    ic->ic_opmode != IEEE80211_M_HOSTAP)
+	if (ic->ic_promisc == 0 && sc->bcn_vaps == 0)
 		urtwm_set_rx_bssid_all(sc, 0);
 
-	vap = TAILQ_FIRST(&ic->ic_vaps);
-	if (vap->iv_state == IEEE80211_S_RUN)
-		urtwm_set_led(sc, URTWM_LED_LINK, 1);
-	else
-		urtwm_set_led(sc, URTWM_LED_LINK, 0);
+	/* Restore LED state. */
+	urtwm_set_led(sc, URTWM_LED_LINK, (sc->vaps_running != 0));
 	URTWM_UNLOCK(sc);
 }
 
@@ -6098,35 +6519,21 @@ static void
 urtwm_set_promisc(struct urtwm_softc *sc)
 {
 	struct ieee80211com *ic = &sc->sc_ic;
-	struct ieee80211vap *vap = TAILQ_FIRST(&ic->ic_vaps);
 	uint32_t mask1, mask2;
 
 	URTWM_ASSERT_LOCKED(sc);
 
-	if (vap->iv_opmode == IEEE80211_M_MONITOR)
-		return;
-
 	mask1 = R92C_RCR_ACF | R92C_RCR_ADF | R92C_RCR_AMF | R92C_RCR_AAP;
 	mask2 = R92C_RCR_APM;
 
-	if (vap->iv_state == IEEE80211_S_RUN) {
-		switch (vap->iv_opmode) {
-		case IEEE80211_M_STA:
+	if (sc->vaps_running != 0) {
+		if (sc->bcn_vaps == 0)
 			mask2 |= R92C_RCR_CBSSID_BCN;
-			/* FALLTHROUGH */
-		case IEEE80211_M_IBSS:
+		if (sc->ap_vaps == 0)
 			mask2 |= R92C_RCR_CBSSID_DATA;
-			break;
-		case IEEE80211_M_HOSTAP:
-			break;
-		default:
-			device_printf(sc->sc_dev, "%s: undefined opmode %d\n",
-			    __func__, vap->iv_opmode);
-			return;
-		}
 	}
 
-	if (ic->ic_promisc == 0)
+	if (ic->ic_promisc == 0 && sc->mon_vaps == 0)
 		urtwm_setbits_4(sc, R92C_RCR, mask1, mask2);
 	else
 		urtwm_setbits_4(sc, R92C_RCR, mask2, mask1);
@@ -6152,6 +6559,36 @@ urtwm_update_mcast(struct ieee80211com *ic)
 	if (sc->sc_flags & URTWM_RUNNING)
 		urtwm_set_multi(sc);
 	URTWM_UNLOCK(sc);
+}
+
+static int
+urtwm_set_bssid(struct urtwm_softc *sc, const uint8_t *bssid, int id)
+{
+	usb_error_t error;
+
+	error = urtwm_write_4(sc, R92C_BSSID(id), le32dec(&bssid[0]));
+	if (error != USB_ERR_NORMAL_COMPLETION)
+		return (EIO);
+	error = urtwm_write_2(sc, R92C_BSSID(id) + 4, le16dec(&bssid[4]));
+	if (error != USB_ERR_NORMAL_COMPLETION)
+		return (EIO);
+
+	return (0);
+}
+
+static int
+urtwm_set_macaddr(struct urtwm_softc *sc, const uint8_t *addr, int id)
+{
+	usb_error_t error;
+
+	error = urtwm_write_4(sc, R92C_MACID(id), le32dec(&addr[0]));
+	if (error != USB_ERR_NORMAL_COMPLETION)
+		return (EIO);
+	error = urtwm_write_2(sc, R92C_MACID(id) + 4, le16dec(&addr[4]));
+	if (error != USB_ERR_NORMAL_COMPLETION)
+		return (EIO);
+
+	return (0);
 }
 
 static struct ieee80211_node *
@@ -6573,9 +7010,6 @@ static int
 urtwm_init(struct urtwm_softc *sc)
 {
 	struct ieee80211com *ic = &sc->sc_ic;
-	struct ieee80211vap *vap = TAILQ_FIRST(&ic->ic_vaps);
-	struct urtwm_vap *uvp = URTWM_VAP(vap);
-	usb_error_t usb_err = USB_ERR_NORMAL_COMPLETION;
 	int i, error;
 
 	URTWM_LOCK(sc);
@@ -6650,14 +7084,21 @@ urtwm_init(struct urtwm_softc *sc)
 	urtwm_write_4(sc, R88E_HIMR, 0);
 	urtwm_write_4(sc, R88E_HIMRE, 0);
 
-	/* Set MAC address. */
-	usb_err = urtwm_write_region_1(sc, R92C_MACID, vap->iv_myaddr,
-	    IEEE80211_ADDR_LEN);
-	if (usb_err != USB_ERR_NORMAL_COMPLETION)
-		goto fail;
+	for (i = 0; i < nitems(sc->vaps); i++) {
+		struct urtwm_vap *uvp = sc->vaps[i];
+
+		if (uvp == NULL)
+			continue;
+
+		/* Set MAC address. */
+		error = urtwm_set_macaddr(sc, uvp->vap.iv_myaddr, uvp->id);
+		if (error != 0)
+			goto fail;
+	}
 
 	/* Set initial network type. */
 	urtwm_set_mode(sc, R92C_MSR_NOLINK, 0);
+	urtwm_set_mode(sc, R92C_MSR_NOLINK, 1);
 
 	/* Initialize Rx filter. */
 	urtwm_rxfilter_init(sc);
@@ -6692,7 +7133,8 @@ urtwm_init(struct urtwm_softc *sc)
 	    R92C_TRXDMA_CTRL_RXDMA_AGG_EN);
 
 	/* Initialize beacon parameters. */
-	urtwm_write_2(sc, R92C_BCN_CTRL, 0x1010);
+	urtwm_write_1(sc, R92C_BCN_CTRL(0), R92C_BCN_CTRL_DIS_TSF_UDT0);
+	urtwm_write_1(sc, R92C_BCN_CTRL(1), R92C_BCN_CTRL_DIS_TSF_UDT0);
 	urtwm_write_2(sc, R92C_TBTT_PROHIBIT, 0x6404);
 	urtwm_write_1(sc, R92C_DRVERLYINT, 0x05);
 	urtwm_write_1(sc, R92C_BCNDMATIM, 0x02);
@@ -6773,9 +7215,8 @@ urtwm_init(struct urtwm_softc *sc)
 
 	/* Enable decryption / encryption. */
 	urtwm_write_2(sc, R92C_SECCFG,
-	    R92C_SECCFG_TXUCKEY_DEF | R92C_SECCFG_RXUCKEY_DEF |
 	    R92C_SECCFG_TXENC_ENA | R92C_SECCFG_RXDEC_ENA |
-	    R92C_SECCFG_TXBCKEY_DEF | R92C_SECCFG_RXBCKEY_DEF);
+	    R92C_SECCFG_MC_SRCH_DIS);
 
 	/* Initialize antenna selection. */
 	urtwm_antsel_init(sc);
@@ -6809,22 +7250,7 @@ urtwm_init(struct urtwm_softc *sc)
 	usbd_transfer_start(sc->sc_xfer[URTWM_BULK_RX]);
 
 	sc->sc_flags |= URTWM_RUNNING;
-
-	/*
-	 * Install static keys (if any).
-	 * Must be called after urtwm_cam_init().
-	 */
-	for (i = 0; i < IEEE80211_WEP_NKID; i++) {
-		const struct ieee80211_key *k = uvp->keys[i];
-		if (k != NULL) {
-			urtwm_cmd_sleepable(sc, k, sizeof(*k),
-			    urtwm_key_set_cb);
-		}
-	}
 fail:
-	if (usb_err != USB_ERR_NORMAL_COMPLETION)
-		error = EIO;
-
 	URTWM_UNLOCK(sc);
 
 	return (error);
@@ -6844,6 +7270,11 @@ urtwm_stop(struct urtwm_softc *sc)
 	sc->sc_flags &= ~(URTWM_TEMP_MEASURED | URTWM_IQK_RUNNING);
 	sc->fwver = 0;
 	sc->thcal_temp = 0;
+	sc->cur_bcnq_id = URTWM_VAP_ID_INVALID;
+
+#ifdef D4054
+	ieee80211_tx_watchdog_stop(&sc->sc_ic);
+#endif
 
 	urtwm_abort_xfers(sc);
 	urtwm_drain_mbufq(sc);

@@ -212,12 +212,10 @@
 #define R92C_TBTT_PROHIBIT		0x540
 #define R92C_RD_NAV_NXT			0x544
 #define R92C_NAV_PROT_LEN		0x546
-#define R92C_BCN_CTRL			0x550
-#define R92C_BCN_CTRL1			0x551
+#define R92C_BCN_CTRL(id)		((id) + 0x550)
 #define R92C_MBID_NUM			0x552
 #define R92C_DUAL_TSF_RST		0x553
-#define R92C_BCN_INTERVAL		0x554
-#define R92C_BCN_INTERVAL1		0x556
+#define R92C_BCN_INTERVAL(id)		(0x554 + (id) * 2)
 #define R92C_DRVERLYINT			0x558
 #define R92C_BCNDMATIM			0x559
 #define R92C_ATIMWND			0x55a
@@ -244,8 +242,8 @@
 #define R92C_RCR			0x608
 #define R92C_RX_PKT_LIMIT		0x60c
 #define R92C_RX_DRVINFO_SZ		0x60f
-#define R92C_MACID			0x610
-#define R92C_BSSID			0x618
+#define R92C_MACID0			0x610
+#define R92C_BSSID0			0x618
 #define R92C_MAR			0x620
 #define R92C_USTIME_EDCA		0x638
 #define R92C_MAC_SPEC_SIFS		0x63a
@@ -263,6 +261,12 @@
 #define R92C_RXFLTMAP1			0x6a2
 #define R92C_RXFLTMAP2			0x6a4
 #define R92C_BCN_PSR_RPT		0x6a8
+#define R92C_MACID1			0x700
+#define R92C_BSSID1			0x708
+
+
+#define R92C_MACID(id)			((id) == 0 ? R92C_MACID0 : R92C_MACID1)
+#define R92C_BSSID(id)			((id) == 0 ? R92C_BSSID0 : R92C_BSSID1)
 
 /* Bits for R92C_SYS_ISO_CTRL. */
 #define R92C_SYS_ISO_CTRL_MD2PP		0x0001
@@ -526,7 +530,8 @@
 #define R92C_RQPN_LD		0x80000000
 
 /* Bits for R12A_DWBCN1_CTRL. */
-#define R12A_DWBCN1_CTRL_SEL_EN		0x02
+#define R12A_DWBCN1_CTRL_SEL_EN		0x00000002
+#define R12A_DWBCN1_CTRL_SEL_BCN1	0x00100000
 
 /* Bits for R92C_TDECTRL. */
 #define R92C_TDECTRL_BLK_DESC_NUM_M	0x000000f0
@@ -561,6 +566,7 @@
 #define R92C_RRSR_SHORT			0x00800000
 
 /* Bits for R12A_CCK_CHECK. */
+#define R12A_CCK_CHECK_BCN1		0x20
 #define R12A_CCK_CHECK_5GHZ		0x80
 
 /* Bits for R12A_DATA_SEC. */
@@ -618,8 +624,7 @@
 #define R92C_MBID_TXBCN_RPT1		0x10
 
 /* Bits for R92C_DUAL_TSF_RST. */
-#define R92C_DUAL_TSF_RST0		0x01
-#define R92C_DUAL_TSF_RST1		0x02
+#define R92C_DUAL_TSF_RESET(id)		(0x01 << (id))
 #define R92C_DUAL_TSF_RST_TXOK		0x20
 
 /* Bits for R92C_ACMHWCTRL. */
@@ -681,6 +686,7 @@
 #define R92C_SECCFG_TXENC_ENA	0x0004
 #define R92C_SECCFG_RXDEC_ENA	0x0008
 #define R92C_SECCFG_CMP_A2	0x0010
+#define R92C_SECCFG_MC_SRCH_DIS	0x0020
 #define R92C_SECCFG_TXBCKEY_DEF	0x0040
 #define R92C_SECCFG_RXBCKEY_DEF	0x0080
 #define R88E_SECCFG_CHK_KEYID	0x0100
@@ -1427,6 +1433,8 @@ struct r12a_tx_desc {
 #define R12A_TXDW2_AMPDU_DEN_S	20
 
 	uint32_t	txdw3;
+#define R12A_TXDW3_SEQ_SEL_M	0x000000c0
+#define R12A_TXDW3_SEQ_SEL_S	6
 #define R12A_TXDW3_DRVRATE	0x00000100
 #define R12A_TXDW3_DISRTSFB	0x00000200
 #define R12A_TXDW3_DISDATAFB	0x00000400
@@ -1454,6 +1462,8 @@ struct r12a_tx_desc {
 #define R12A_TXDW5_DATA_LDPC	0x00000080
 
 	uint32_t	txdw6;
+#define R21A_TXDW6_MBSSID_M	0x0000f000
+#define R21A_TXDW6_MBSSID_S	12
 
 	uint16_t	txdsum;
 	uint16_t	flags7;

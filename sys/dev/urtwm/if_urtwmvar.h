@@ -19,7 +19,6 @@
 
 #define URTWM_RX_LIST_COUNT		1
 #define URTWM_TX_LIST_COUNT		16
-#define URTWM_HOST_CMD_RING_COUNT	32
 
 #define URTWM_RXBUFSZ	(8 * 1024)
 #define URTWM_TXBUFSZ	(sizeof(struct r12a_tx_desc) + IEEE80211_MAX_LEN)
@@ -94,14 +93,14 @@ struct urtwm_node {
 
 struct urtwm_vap {
 	struct ieee80211vap	vap;
+	int			id;
+#define URTWM_VAP_ID_INVALID	-1
 
 	struct r12a_tx_desc	bcn_desc;
 	struct mbuf		*bcn_mbuf;
 
 	struct callout		tsf_sync_adhoc;
 	struct task		tsf_sync_adhoc_task;
-
-	const struct ieee80211_key	*keys[IEEE80211_WEP_NKID];
 
 	int			(*newstate)(struct ieee80211vap *,
 				    enum ieee80211_state, int);
@@ -191,8 +190,18 @@ struct urtwm_softc {
 	int			ntx;
 	int			ledlink;
 	int			sc_ant;
+	int			cur_bcnq_id;
+
 	int8_t			last_rssi;
 	uint8_t			thcal_temp;
+
+	int			nvaps;
+	int			ap_vaps;
+	int			bcn_vaps;
+	int			mon_vaps;
+
+	int			vaps_running;
+	int			monvaps_running;
 
 	const char		*fwname;
 	uint16_t		fwver;
@@ -211,6 +220,7 @@ struct urtwm_softc {
 	uint16_t		next_rom_addr;
 	uint64_t		keys_bmap;
 
+	struct urtwm_vap	*vaps[2];
 	struct ieee80211_node	*node_list[R12A_MACID_MAX + 1];
 	struct mtx		nt_mtx;
 
@@ -254,6 +264,8 @@ struct urtwm_softc {
 	void		(*sc_crystalcap_write)(struct urtwm_softc *);
 	void		(*sc_set_band_2ghz)(struct urtwm_softc *);
 	void		(*sc_set_band_5ghz)(struct urtwm_softc *);
+	void		(*sc_transfer_submit)(struct urtwm_softc *,
+			    struct usb_xfer *, struct urtwm_data *);
 
 	const struct urtwm_mac_prog	*mac_prog;
 	int				mac_size;
