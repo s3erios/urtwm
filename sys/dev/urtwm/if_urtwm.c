@@ -2860,7 +2860,7 @@ urtwm_construct_nulldata(struct urtwm_softc *sc, struct ieee80211vap *vap,
 		const int tid = WME_AC_TO_TID(WME_AC_BE);
 
 		txd->pktlen = htole16(sizeof(*qwh));
-		qwh = (struct ieee80211_qosframe *)ptr;
+		qwh = (struct ieee80211_qosframe *)wh;
 		qwh->i_fc[0] |= IEEE80211_FC0_SUBTYPE_QOS_NULL;
 		qwh->i_qos[0] = tid & IEEE80211_QOS_TID;
 	} else {
