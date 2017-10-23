@@ -127,6 +127,8 @@ static const STRUCT_USB_HOST_ID urtwm_devs[] = {
 	URTWM_RTL8812A_DEV(PLANEX2,		GW900D),
 	URTWM_RTL8812A_DEV(SENAO,		EUB1200AC),
 	URTWM_RTL8812A_DEV(SITECOMEU,		WLA7100),
+        URTWM_RTL8812A_DEV(TPLINK,		T4UV2),
+        URTWM_RTL8812A_DEV(TPLINK,		T4UHV2),
 	URTWM_RTL8812A_DEV(TRENDNET,		TEW805UB),
 	URTWM_RTL8812A_DEV(ZYXEL,		NWD6605),
 	URTWM_DEV(DLINK,	DWA171A1),
@@ -1261,7 +1263,7 @@ urtwm_ratectl_tx_complete(struct urtwm_softc *sc, void *buf, int len)
 	if (len != sizeof(*rpt)) {
 		device_printf(sc->sc_dev,
 		    "%s: wrong report size (%d, must be %d)\n",
-		    __func__, len, sizeof(*rpt));
+		    __func__, len, (int) sizeof(*rpt));
 		return;
 	}
 
@@ -5311,7 +5313,7 @@ urtwm_load_firmware(struct urtwm_softc *sc)
 
 	len = fw->datasize;
 	if (len < sizeof(*hdr) || len > R12A_MAX_FW_SIZE) {
-		device_printf(sc->sc_dev, "wrong firmware size (%d)\n", len);
+		device_printf(sc->sc_dev, "wrong firmware size (%d)\n", (int) len);
 		error = EINVAL;
 		goto fail;
 	}
