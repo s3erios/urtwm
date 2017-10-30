@@ -1262,8 +1262,8 @@ urtwm_ratectl_tx_complete(struct urtwm_softc *sc, void *buf, int len)
 
 	if (len != sizeof(*rpt)) {
 		device_printf(sc->sc_dev,
-		    "%s: wrong report size (%d, must be %d)\n",
-		    __func__, len, (int) sizeof(*rpt));
+		    "%s: wrong report size (%d, must be %zu)\n",
+		    __func__, len, sizeof(*rpt));
 		return;
 	}
 
@@ -5313,7 +5313,7 @@ urtwm_load_firmware(struct urtwm_softc *sc)
 
 	len = fw->datasize;
 	if (len < sizeof(*hdr) || len > R12A_MAX_FW_SIZE) {
-		device_printf(sc->sc_dev, "wrong firmware size (%d)\n", (int) len);
+		device_printf(sc->sc_dev, "wrong firmware size (%zu)\n", len);
 		error = EINVAL;
 		goto fail;
 	}
